@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "925219852485",
+    "project_id": "pwd-works",
+    "storage_bucket": "pwd-works.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:925219852485:android:14e3b88f5dd8dafdb120ac",
+        "android_client_info": {
+          "package_name": "com.example.pwd_road_work"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArxvg4YXDZyf3diBMT8jO86_U2NmH0VXk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
