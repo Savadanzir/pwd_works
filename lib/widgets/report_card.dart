@@ -11,10 +11,14 @@ class ReportCard extends StatelessWidget {
     switch (status) {
       case 'Pending':
         return Colors.orange;
-      case 'Assigned':
+      case 'Approved':
         return Colors.blue;
-      case 'In Progress':
+      case 'Rejected':
+        return Colors.red;
+      case 'Assigned':
         return Colors.purple;
+      case 'In Progress':
+        return Colors.indigo;
       case 'Completed':
         return Colors.green;
       default:
@@ -31,10 +35,10 @@ class ReportCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -76,7 +80,8 @@ class ReportCard extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.location_on, size: 16, color: Colors.red),
+                  const Icon(Icons.location_on,
+                      size: 16, color: Colors.red),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
@@ -87,10 +92,45 @@ class ReportCard extends StatelessWidget {
                   ),
                   Text(
                     DateFormat('dd MMM yyyy').format(createdAt),
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ),
+              // Show admin reply if rejected
+              if (status == 'Rejected' &&
+                  (data['adminReply'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.red.withOpacity(0.30),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.reply_rounded,
+                          size: 14, color: Colors.redAccent),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          data['adminReply'],
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.redAccent,
+                              height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

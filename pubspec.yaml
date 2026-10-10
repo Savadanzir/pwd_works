@@ -96,7 +96,6 @@
 #   # see https://flutter.dev/to/font-from-package
 
 
-
 name: road_maintenance
 description: Road Maintenance Reporting App
 publish_to: 'none'
@@ -118,6 +117,12 @@ dependencies:
   geolocator: ^10.1.0
   intl: ^0.19.0
   uuid: ^4.2.2
+  url_launcher: ^6.2.5
+  # 👇 NEW — for the map
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.1
+  geocoding: ^3.0.0
+
 
 flutter:
   uses-material-design: true
