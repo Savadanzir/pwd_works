@@ -57,7 +57,7 @@ class DailyReportProvider extends ChangeNotifier {
           .get();
       _reports = snap.docs
           .map((d) =>
-              DailyReportModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+              DailyReportModel.fromMap(d.id, d.data()))
           .toList();
     } catch (e) {
       _error = e.toString();

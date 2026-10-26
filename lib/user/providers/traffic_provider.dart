@@ -23,8 +23,7 @@ class TrafficProvider extends ChangeNotifier {
           .get();
 
       _trafficBlocks = snap.docs
-          .map((d) =>
-              ReportModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+            .map((d) => ReportModel.fromMap(d.id, d.data()))
           .where((r) => r.category.toLowerCase().contains('traffic'))
           .toList();
     } catch (e) {

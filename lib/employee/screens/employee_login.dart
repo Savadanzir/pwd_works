@@ -3,8 +3,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:road_maintenance/services/district_service.dart';
 
-import '../../services/district_service.dart';
 import '../../widgets/road_logo.dart';
 import '../providers/employee_provider.dart';
 import 'employee_home.dart';

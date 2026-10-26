@@ -59,7 +59,7 @@ class LeaveRequestProvider extends ChangeNotifier {
           .get();
       _requests = snap.docs
           .map((d) =>
-              LeaveRequestModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+              LeaveRequestModel.fromMap(d.id, d.data()))
           .toList();
       _requests.sort((a, b) {
         final ta = a.createdAt?.toDate() ?? DateTime(2000);

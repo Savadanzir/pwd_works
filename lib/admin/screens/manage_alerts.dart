@@ -2,9 +2,6 @@ import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-
-import '../../services/district_service.dart';
 
 class ManageAlerts extends StatefulWidget {
   const ManageAlerts({super.key});
@@ -84,7 +81,7 @@ class _ManageAlertsState extends State<ManageAlerts> {
                   'title': titleCtrl.text.trim(),
                   'message': msgCtrl.text.trim(),
                   'severity': severity, // 'Info' | 'Warning' | 'Critical'
-                  'district': DistrictService.current ?? '',
+                  'district': '',
                   'createdAt': Timestamp.now(),
                   'createdBy': 'admin',
                 });

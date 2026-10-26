@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:road_maintenance/services/district_service.dart';
 
-import '../../services/district_service.dart';
 import '../../services/firestore_service.dart';
 
 class ManageEmployees extends StatefulWidget {

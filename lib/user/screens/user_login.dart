@@ -286,9 +286,16 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const RoadLogo(
-                    width: 220,
-                    glowColor: Color(0xFF10B981),
+                  AnimatedBuilder(
+                    animation: _logoRotate,
+                    child: const RoadLogo(
+                      width: 220,
+                      glowColor: Color(0xFF10B981),
+                    ),
+                    builder: (context, child) => Transform.rotate(
+                      angle: _logoRotate.value,
+                      child: child,
+                    ),
                   ),
                   const SizedBox(height: 20),
                   const Text(

@@ -23,8 +23,7 @@ class AssignedWorksProvider extends ChangeNotifier {
           .get();
 
       _works = snap.docs
-          .map((d) =>
-              WorkModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+            .map((d) => WorkModel.fromMap(d.id, d.data()))
           .toList();
 
       _works.sort((a, b) {

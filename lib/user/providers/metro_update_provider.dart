@@ -49,7 +49,7 @@ class MetroUpdateProvider extends ChangeNotifier {
         .snapshots()
         .map((snap) => snap.docs
             .map((d) =>
-                MetroUpdate.fromMap(d.id, d.data() as Map<String, dynamic>))
+                MetroUpdate.fromMap(d.id, d.data()))
             .toList());
   }
 

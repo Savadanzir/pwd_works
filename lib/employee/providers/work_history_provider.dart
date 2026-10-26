@@ -23,8 +23,7 @@ class WorkHistoryProvider extends ChangeNotifier {
           .get();
 
       _history = snap.docs
-          .map((d) =>
-              WorkModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+            .map((d) => WorkModel.fromMap(d.id, d.data()))
           .where((w) => w.status == 'Completed')
           .toList();
 

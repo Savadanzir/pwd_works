@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../services/firestore_service.dart';
 import '../models/report_model.dart';
 
 class RoadWorkProvider extends ChangeNotifier {
-  final FirestoreService _db = FirestoreService();
-
   List<ReportModel> _activeWorks = [];
   bool _loading = false;
   String? _error;
@@ -27,7 +24,7 @@ class RoadWorkProvider extends ChangeNotifier {
 
       final all = snap.docs
           .map((d) =>
-              ReportModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+            ReportModel.fromMap(d.id, d.data()))
           .where((r) => r.category.toLowerCase().contains('road'))
           .toList();
 

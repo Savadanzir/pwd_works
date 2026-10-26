@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/district_service.dart';
 import '../../widgets/road_logo.dart';
 import '../providers/admin_provider.dart';
 import 'admin_defaults.dart';
@@ -171,8 +170,6 @@ class _AdminLoginState extends State<AdminLogin>
       );
       return;
     }
-
-    await DistrictService.set(_selectedDistrict!);
 
     if (!mounted) return;
     Navigator.pushReplacement(

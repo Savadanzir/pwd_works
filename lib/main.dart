@@ -9,12 +9,6 @@ import 'package:road_maintenance/services/settings_service.dart';
 import 'firebase_options.dart';
 
 // ============================================================
-// DISTRICT
-// ============================================================
-import 'services/district_selection.dart';
-import 'services/district_service.dart';
-
-// ============================================================
 // USER MODULE
 // ============================================================
 import 'user/providers/user_provider.dart';
@@ -123,36 +117,8 @@ class MyApp extends StatelessWidget {
           primarySwatch: Colors.blue,
           scaffoldBackgroundColor: const Color(0xFF04060F),
         ),
-        home: const DistrictGate(),
+        home: const PlatformGate(),
       ),
-    );
-  }
-}
-
-// ============================================================
-// 🌐 DISTRICT GATE
-// ============================================================
-class DistrictGate extends StatelessWidget {
-  const DistrictGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
-      future: DistrictService.load(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF04060F),
-            body: Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-          );
-        }
-        if (snapshot.data == null) {
-          return const DistrictSelection();
-        }
-        return const PlatformGate();
-      },
     );
   }
 }
@@ -444,9 +410,12 @@ class _WebPortalScreenState extends State<WebPortalScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo
-                const RoadLogo(
-                  width: 240,
-                  glowColor: Color(0xFFF59E0B),
+                RotationTransition(
+                  turns: _logoRotate,
+                  child: const RoadLogo(
+                    width: 240,
+                    glowColor: Color(0xFFF59E0B),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(

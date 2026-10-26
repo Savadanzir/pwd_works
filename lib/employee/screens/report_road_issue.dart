@@ -2,12 +2,10 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/district_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/location_service.dart';
 import '../providers/employee_provider.dart';
@@ -138,7 +136,7 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
         'title': _title.text.trim(),
         'description': _desc.text.trim(),
         'category': _category,
-        'district': DistrictService.current ?? '',
+        'district': '',
         'location': _loc.text.trim(),
         'latitude': _lat,
         'longitude': _lng,
