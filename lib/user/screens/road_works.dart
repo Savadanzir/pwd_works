@@ -1,39 +1,52 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../providers/road_work_provider.dart';
+import 'package:provider/provider.dart';
+
+import '../../services/firestore_service.dart';
+import '../providers/user_provider.dart';
 
 class RoadWorks extends StatefulWidget {
   const RoadWorks({super.key});
+
   @override
   State<RoadWorks> createState() => _RoadWorksState();
 }
 
 class _RoadWorksState extends State<RoadWorks>
     with TickerProviderStateMixin {
-  String _filter = 'active';
-
-  late AnimationController _bgCtrl, _orbCtrl, _dustCtrl;
-  late Animation<double> _bgAnim, _orbAnim, _dustRise;
+  late AnimationController _bgCtrl;
+  late AnimationController _orbCtrl;
+  late AnimationController _dustCtrl;
+  late Animation<double> _bgAnim;
+  late Animation<double> _orbAnim;
+  late Animation<double> _dustRise;
   Offset _parallax = Offset.zero;
+
+  bool _loading = true;
+  List<QueryDocumentSnapshot> _works = [];
 
   @override
   void initState() {
     super.initState();
-    _bgCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 10))..repeat(reverse: true);
+    _bgCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 10))
+          ..repeat(reverse: true);
     _bgAnim = CurvedAnimation(parent: _bgCtrl, curve: Curves.easeInOut);
 
-    _orbCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 14))..repeat(reverse: true);
+    _orbCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 14))
+          ..repeat(reverse: true);
     _orbAnim = CurvedAnimation(parent: _orbCtrl, curve: Curves.easeInOut);
 
-    _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
+    _dustCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 6))
+          ..repeat();
     _dustRise = CurvedAnimation(parent: _dustCtrl, curve: Curves.linear);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<RoadWorkProvider>(context, listen: false).loadActiveWorks();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
@@ -50,22 +63,73 @@ class _RoadWorksState extends State<RoadWorks>
     setState(() => _parallax = Offset(dx, dy));
   }
 
+  // ============================================================
+  // 🔄 LOAD — show works verified/completed by the admin
+  // ============================================================
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final uid =
+          Provider.of<UserProvider>(context, listen: false).user?.uid ?? '';
+      if (uid.isEmpty) {
+        setState(() => _works = []);
+        return;
+      }
+
+      // All reports submitted by this user
+      final snap = await FirestoreService().getUserReports(uid);
+
+      // Keep ones whose category is Road Work AND the admin has finished
+      // verifying/completing them
+      final done = snap.where((d) {
+        final data = d.data() as Map<String, dynamic>;
+        final cat = (data['category'] ?? '').toString();
+        final status = (data['status'] ?? '').toString();
+        final isRoadWork = cat == 'Road Work';
+        final isVerified = status == 'Completed' || status == 'Verified';
+        return isRoadWork && isVerified;
+      }).toList();
+
+      // Newest first
+      done.sort((a, b) {
+        final ta = (a.data() as Map)['createdAt'];
+        final tb = (b.data() as Map)['createdAt'];
+        if (ta is Timestamp && tb is Timestamp) return tb.compareTo(ta);
+        return 0;
+      });
+
+      setState(() => _works = done);
+    } catch (e) {
+      _snack('❌ Failed to load: $e', Colors.redAccent);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final prov = Provider.of<RoadWorkProvider>(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFF04060F),
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Road Works', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Road Works',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => prov.loadActiveWorks(),
+            onPressed: _load,
           ),
         ],
       ),
@@ -85,17 +149,23 @@ class _RoadWorksState extends State<RoadWorks>
                     _dust(size),
                     SafeArea(
                       bottom: false,
-                      child: prov.loading
-                          ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                          : prov.activeWorks.isEmpty
+                      child: _loading
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                  color: Colors.white))
+                          : _works.isEmpty
                               ? _emptyState()
-                              : ListView.builder(
-                                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
-                                  itemCount: prov.activeWorks.length,
-                                  itemBuilder: (context, i) {
-                                    final r = prov.activeWorks[i];
-                                    return _RoadWorkCard(report: r);
-                                  },
+                              : RefreshIndicator(
+                                  color: const Color(0xFFF59E0B),
+                                  backgroundColor: const Color(0xFF0B1730),
+                                  onRefresh: _load,
+                                  child: ListView.builder(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        16, 16, 16, 40),
+                                    itemCount: _works.length,
+                                    itemBuilder: (context, i) =>
+                                        _workCard(_works[i]),
+                                  ),
                                 ),
                     ),
                   ],
@@ -108,12 +178,290 @@ class _RoadWorksState extends State<RoadWorks>
     );
   }
 
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFF59E0B).withOpacity(0.15),
+                border: Border.all(
+                    color: const Color(0xFFF59E0B).withOpacity(0.5),
+                    width: 1.5),
+              ),
+              child: const Icon(Icons.construction_rounded,
+                  color: Colors.white, size: 40),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'No verified road works yet',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Your reported issues will appear here once the admin verifies them.',
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.55), fontSize: 12.5),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _workCard(QueryDocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    final title = data['title'] ?? 'Road Work';
+    final desc = data['description'] ?? '';
+    final location = data['location'] ?? '—';
+    final status = data['status'] ?? 'Completed';
+    final imageUrl = data['imageUrl'];
+    final completionImage = data['completionImage'];
+    final workNote = data['workNote'];
+    final createdAt = data['createdAt'];
+    final dateStr = createdAt is Timestamp
+        ? DateFormat('dd MMM yyyy • HH:mm').format(createdAt.toDate())
+        : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.white.withOpacity(0.10),
+                const Color(0xFFF59E0B).withOpacity(0.08),
+              ]),
+              borderRadius: BorderRadius.circular(22),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.25), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                    color: const Color(0xFFF59E0B).withOpacity(0.25),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8)),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFFF59E0B).withOpacity(0.20),
+                        border: Border.all(
+                            color: const Color(0xFFF59E0B).withOpacity(0.6),
+                            width: 1.2),
+                      ),
+                      child: const Icon(Icons.construction_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    _statusPill(status),
+                  ],
+                ),
+
+                if (desc.toString().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    desc,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.75),
+                        fontSize: 12.5,
+                        height: 1.4),
+                  ),
+                ],
+
+                const SizedBox(height: 10),
+
+                // Location + date
+                Row(
+                  children: [
+                    const Icon(Icons.location_on,
+                        color: Colors.redAccent, size: 14),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        location,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 11.5),
+                      ),
+                    ),
+                    if (dateStr.isNotEmpty)
+                      Text(dateStr,
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.5),
+                              fontSize: 10.5)),
+                  ],
+                ),
+
+                // Before / After photo thumbnails
+                if (imageUrl != null || completionImage != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (imageUrl != null)
+                        Expanded(
+                          child: _photoThumb(imageUrl, 'Before'),
+                        ),
+                      if (imageUrl != null && completionImage != null)
+                        const SizedBox(width: 10),
+                      if (completionImage != null)
+                        Expanded(
+                          child: _photoThumb(completionImage, 'After'),
+                        ),
+                    ],
+                  ),
+                ],
+
+                if (workNote != null &&
+                    workNote.toString().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: const Color(0xFF10B981).withOpacity(0.4),
+                          width: 1),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_rounded,
+                            color: Color(0xFF10B981), size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Admin: $workNote',
+                            style: const TextStyle(
+                                color: Color(0xFF10B981),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _photoThumb(String url, String label) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AspectRatio(
+        aspectRatio: 4 / 3,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              url,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.white10,
+                child: const Icon(Icons.broken_image,
+                    color: Colors.white54, size: 28),
+              ),
+            ),
+            Positioned(
+              left: 6,
+              top: 6,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.65),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statusPill(String status) {
+    final color = status == 'Completed' || status == 'Verified'
+        ? const Color(0xFF10B981)
+        : const Color(0xFFF59E0B);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.65), width: 1),
+      ),
+      child: Text(
+        status,
+        style: TextStyle(
+            color: color,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5),
+      ),
+    );
+  }
+
+  // ---------- Animated background ----------
   Widget _gradientBase() => Container(
         decoration: BoxDecoration(
           gradient: RadialGradient(
-            center: Alignment(-0.4 + _bgAnim.value * 0.2, -0.6 + _bgAnim.value * 0.15),
+            center: Alignment(
+                -0.4 + _bgAnim.value * 0.2, -0.6 + _bgAnim.value * 0.15),
             radius: 1.5,
-            colors: const [Color(0xFF3A2A08), Color(0xFF16100A), Color(0xFF04060F)],
+            colors: const [
+              Color(0xFF2A1B0B),
+              Color(0xFF160A04),
+              Color(0xFF04060F),
+            ],
             stops: const [0.0, 0.55, 1.0],
           ),
         ),
@@ -153,148 +501,36 @@ class _RoadWorksState extends State<RoadWorks>
     for (int i = 0; i < 18; i++) {
       final seed = (i * 0.137) % 1.0;
       final p = (_dustRise.value + seed) % 1.0;
-      final x = size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
+      final x =
+          size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
       final y = size.height - p * size.height * 0.9;
       final opacity = ((1.0 - p) * 0.35).clamp(0.0, 1.0);
       final r = 1.6 + (i % 3) * 1.4;
-      list.add(Positioned(
-        left: x,
-        top: y,
-        child: IgnorePointer(
-          child: Opacity(
-            opacity: opacity,
-            child: Container(
-              width: r * 2,
-              height: r * 2,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.55),
+      list.add(
+        Positioned(
+          left: x,
+          top: y,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: opacity,
+              child: Container(
+                width: r * 2,
+                height: r * 2,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.55),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.white.withOpacity(0.30),
+                        blurRadius: 6),
+                  ],
+                ),
               ),
             ),
           ),
         ),
-      ));
+      );
     }
     return Stack(children: list);
-  }
-
-  Widget _emptyState() => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('🛠️', style: TextStyle(fontSize: 64)),
-            const SizedBox(height: 16),
-            Text(
-              'No active road works right now',
-              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 15),
-            ),
-          ],
-        ),
-      );
-}
-
-class _RoadWorkCard extends StatelessWidget {
-  final dynamic report;
-  const _RoadWorkCard({required this.report});
-
-  Color _statusColor(String s) {
-    switch (s) {
-      case 'Approved': return const Color(0xFF3B82F6);
-      case 'Assigned': return const Color(0xFFA855F7);
-      case 'In Progress': return const Color(0xFF6366F1);
-      case 'Completed': return const Color(0xFF10B981);
-      default: return const Color(0xFFF59E0B);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _statusColor(report.status);
-    final dateStr = report.createdAt != null
-        ? DateFormat('dd MMM yyyy').format(report.createdAt!.toDate())
-        : '';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [
-                Colors.white.withOpacity(0.10),
-                color.withOpacity(0.10),
-              ]),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withOpacity(0.25), width: 1.2),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (report.imageUrl != null && report.imageUrl!.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                    child: AspectRatio(
-                      aspectRatio: 16 / 10,
-                      child: Image.network(report.imageUrl!, fit: BoxFit.cover),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              report.title,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: color.withOpacity(0.20),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: color.withOpacity(0.65), width: 1),
-                            ),
-                            child: Text(report.status,
-                                style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w800)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (report.description.isNotEmpty)
-                        Text(
-                          report.description,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
-                        ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on_rounded, color: Color(0xFFEF4444), size: 14),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              report.location,
-                              style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12),
-                            ),
-                          ),
-                          Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

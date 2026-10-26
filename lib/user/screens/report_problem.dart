@@ -1,12 +1,14 @@
 import 'dart:io';
 import 'dart:ui';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
+import '../../services/firestore_service.dart';
 import '../../services/location_service.dart';
 import '../providers/user_provider.dart';
-import '../providers/report_provider.dart';
 
 class ReportProblem extends StatefulWidget {
   const ReportProblem({super.key});
@@ -24,6 +26,8 @@ class _ReportProblemState extends State<ReportProblem> {
   XFile? _webImage;
   double? _lat, _lng;
 
+  bool _submitting = false;
+
   final _categories = ['Road Work', 'Metro', 'Traffic Block', 'Other'];
 
   @override
@@ -37,7 +41,11 @@ class _ReportProblemState extends State<ReportProblem> {
   Future<void> _pickImage() async {
     try {
       final picker = ImagePicker();
-      final x = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 1600);
+      final x = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 75,
+        maxWidth: 1600,
+      );
       if (x == null) return;
       setState(() {
         if (kIsWeb) {
@@ -58,7 +66,8 @@ class _ReportProblemState extends State<ReportProblem> {
         setState(() {
           _lat = pos.latitude;
           _lng = pos.longitude;
-          _loc.text = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+          _loc.text =
+              '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
         });
       } else {
         _showError('Location not available.');
@@ -71,93 +80,188 @@ class _ReportProblemState extends State<ReportProblem> {
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: const Color(0xFFB91C1C), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFB91C1C),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
+  void _showInfo(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFF59E0B),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ============================================================
+  // 🚀 SUBMIT — with duplicate check
+  // ============================================================
   Future<void> _submit() async {
+    if (_submitting) return;
+
     if (_title.text.trim().isEmpty) return _showError('Please enter a title');
-    if (_desc.text.trim().isEmpty) return _showError('Please describe the problem');
+    if (_desc.text.trim().isEmpty) {
+      return _showError('Please describe the problem');
+    }
 
     final user = Provider.of<UserProvider>(context, listen: false).user;
     if (user == null) return _showError('You must be logged in');
 
-    final prov = Provider.of<ReportProvider>(context, listen: false);
+    setState(() => _submitting = true);
 
-    final dup = await prov.reportAlreadyExists(_title.text.trim());
-    if (dup) {
-      if (mounted) {
-        await showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            backgroundColor: const Color(0xFF0B1730),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            icon: const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 54),
-            title: const Text('Already Reported', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-            content: const Text('This problem has already been reported.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK', style: TextStyle(color: Color(0xFFF59E0B))),
-              ),
-            ],
-          ),
+    try {
+      final fs = FirestoreService();
+
+      // 1️⃣ Check for duplicates
+      final duplicate = await fs.findDuplicateReport(
+        title: _title.text.trim(),
+        category: _category,
+        latitude: _lat,
+        longitude: _lng,
+      );
+
+      if (duplicate != null) {
+        if (!mounted) return;
+        setState(() => _submitting = false);
+
+        // Show the "already reported" dialog
+        final support = await _showDuplicateDialog();
+        if (support == true) {
+          // Support the existing report
+          await fs.supportReport(duplicate.id, user.uid);
+          if (!mounted) return;
+          _showInfo('You are now supporting the existing report.');
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      // 2️⃣ Upload image bytes (Web + Mobile safe)
+      String? imageUrl;
+      if (kIsWeb && _webImage != null) {
+        final bytes = await _webImage!.readAsBytes();
+        imageUrl = await fs.uploadImageBytes(
+          bytes,
+          'reports/${DateTime.now().millisecondsSinceEpoch}_${_webImage!.name}',
+        );
+      } else if (!kIsWeb && _image != null) {
+        final bytes = await _image!.readAsBytes();
+        imageUrl = await fs.uploadImageBytes(
+          bytes,
+          'reports/${DateTime.now().millisecondsSinceEpoch}_img.jpg',
         );
       }
-      return;
-    }
 
-    final bytes = kIsWeb && _webImage != null ? await _webImage!.readAsBytes() : null;
-    final err = await prov.submitReport(
-      userId: user.uid,
-      userName: user.name,
-      userPhone: user.phone,
-      title: _title.text.trim(),
-      description: _desc.text.trim(),
-      category: _category,
-      location: _loc.text.trim(),
-      latitude: _lat,
-      longitude: _lng,
-      image: kIsWeb ? null : _image,
-      webImage: bytes != null ? XFileBytes(bytes) : null,
-    );
-
-    if (err == null && mounted) {
-      _title.clear();
-      _desc.clear();
-      _loc.clear();
-      setState(() {
-        _image = null;
-        _webImage = null;
-        _lat = null;
-        _lng = null;
+      // 3️⃣ Save new report
+      await fs.addReport({
+        'userId': user.uid,
+        'userName': user.name,
+        'userPhone': user.phone,
+        'title': _title.text.trim(),
+        'description': _desc.text.trim(),
+        'category': _category,
+        'location': _loc.text.trim(),
+        'latitude': _lat,
+        'longitude': _lng,
+        'imageUrl': imageUrl,
+        'status': 'Pending',
+        'supporters': <String>[user.uid],
+        'createdAt': Timestamp.now(),
       });
-      await showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF0B1730),
-          icon: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 54),
-          title: const Text('Report Submitted', textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
-          content: const Text('Sent to the admin for approval.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
-          ],
-        ),
-      );
+
+      if (!mounted) return;
+      await _showSuccessDialog();
       if (mounted) Navigator.pop(context);
-    } else if (mounted) {
-      _showError('Submission failed: $err');
+    } catch (e) {
+      _showError('Submission failed: $e');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  // ---------- Duplicate dialog ----------
+  Future<bool?> _showDuplicateDialog() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0B1730),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: const Icon(Icons.info_outline_rounded,
+            color: Color(0xFFF59E0B), size: 54),
+        title: const Text(
+          'Already Reported',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          'This issue has already been reported. You can support the '
+          'existing report instead of creating a new one.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.thumb_up_alt_rounded, size: 16),
+            label: const Text('Support Existing'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Success dialog ----------
+  Future<void> _showSuccessDialog() {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0B1730),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: const Icon(Icons.check_circle_rounded,
+            color: Color(0xFF10B981), size: 54),
+        title: const Text('Report Submitted',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Sent to the admin\'s Applications for approval.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK',
+                style: TextStyle(color: Color(0xFFA855F7))),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final prov = Provider.of<ReportProvider>(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFF04060F),
       appBar: AppBar(
-        title: const Text('Report Problem', style: TextStyle(color: Colors.white)),
+        title: const Text('Report Problem',
+            style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -180,18 +284,23 @@ class _ReportProblemState extends State<ReportProblem> {
                 const SizedBox(height: 14),
                 _dropdown(),
                 const SizedBox(height: 14),
-                _glassField(_desc, 'Description', Icons.description_rounded, maxLines: 3),
+                _glassField(_desc, 'Description', Icons.description_rounded,
+                    maxLines: 3),
                 const SizedBox(height: 14),
                 _glassField(_loc, 'Location', Icons.location_on_rounded),
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    Expanded(child: _iconBtn(Icons.my_location_rounded, 'Get GPS', _getLocation)),
+                    Expanded(
+                        child: _iconBtn(
+                            Icons.my_location_rounded, 'Get GPS', _getLocation)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _iconBtn(
                         Icons.image_rounded,
-                        (_image != null || _webImage != null) ? 'Change' : 'Pick Image',
+                        (_image != null || _webImage != null)
+                            ? 'Change'
+                            : 'Pick Image',
                         _pickImage,
                       ),
                     ),
@@ -214,7 +323,7 @@ class _ReportProblemState extends State<ReportProblem> {
                     ),
                   ),
                 const SizedBox(height: 24),
-                _submitButton(prov),
+                _submitButton(),
               ],
             ),
           ),
@@ -223,7 +332,9 @@ class _ReportProblemState extends State<ReportProblem> {
     );
   }
 
-  Widget _glassField(TextEditingController c, String hint, IconData icon, {int maxLines = 1}) => ClipRRect(
+  Widget _glassField(TextEditingController c, String hint, IconData icon,
+          {int maxLines = 1}) =>
+      ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -234,7 +345,8 @@ class _ReportProblemState extends State<ReportProblem> {
                 Colors.white.withOpacity(0.04),
               ]),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
             ),
             child: TextField(
               controller: c,
@@ -243,10 +355,13 @@ class _ReportProblemState extends State<ReportProblem> {
               cursorColor: const Color(0xFFA855F7),
               decoration: InputDecoration(
                 hintText: hint,
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 14.5),
-                prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.85), size: 20),
+                hintStyle: TextStyle(
+                    color: Colors.white.withOpacity(0.55), fontSize: 14.5),
+                prefixIcon: Icon(icon,
+                    color: Colors.white.withOpacity(0.85), size: 20),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
               ),
             ),
           ),
@@ -265,16 +380,20 @@ class _ReportProblemState extends State<ReportProblem> {
                 Colors.white.withOpacity(0.04),
               ]),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: _category,
                 isExpanded: true,
                 dropdownColor: const Color(0xFF1B2B54),
-                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
+                icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white),
                 style: const TextStyle(color: Colors.white, fontSize: 15),
-                items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                items: _categories
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
                 onChanged: (v) => setState(() => _category = v!),
               ),
             ),
@@ -282,7 +401,8 @@ class _ReportProblemState extends State<ReportProblem> {
         ),
       );
 
-  Widget _iconBtn(IconData icon, String label, VoidCallback onTap) => GestureDetector(
+  Widget _iconBtn(IconData icon, String label, VoidCallback onTap) =>
+      GestureDetector(
         onTap: onTap,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
@@ -296,14 +416,19 @@ class _ReportProblemState extends State<ReportProblem> {
                   const Color(0xFFA855F7).withOpacity(0.10),
                 ]),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.28), width: 1.2),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(icon, color: Colors.white, size: 18),
                   const SizedBox(width: 8),
-                  Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                  Text(label,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13)),
                 ],
               ),
             ),
@@ -311,22 +436,35 @@ class _ReportProblemState extends State<ReportProblem> {
         ),
       );
 
-  Widget _submitButton(ReportProvider prov) => GestureDetector(
-        onTap: prov.loading ? null : _submit,
+  Widget _submitButton() => GestureDetector(
+        onTap: _submitting ? null : _submit,
         child: Container(
           height: 58,
           width: double.infinity,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(colors: [Color(0xFFA855F7), Color(0xFF6366F1)]),
+            gradient: const LinearGradient(
+                colors: [Color(0xFFA855F7), Color(0xFF6366F1)]),
             boxShadow: [
-              BoxShadow(color: const Color(0xFFA855F7).withOpacity(0.55), blurRadius: 26, offset: const Offset(0, 10)),
+              BoxShadow(
+                  color: const Color(0xFFA855F7).withOpacity(0.55),
+                  blurRadius: 26,
+                  offset: const Offset(0, 10)),
             ],
           ),
           child: Center(
-            child: prov.loading
-                ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('Submit Report', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+            child: _submitting
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2),
+                  )
+                : const Text('Submit Report',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
           ),
         ),
       );

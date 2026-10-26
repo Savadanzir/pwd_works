@@ -1,61 +1,207 @@
-import 'dart:math' as math;
 import 'dart:ui';
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
-import '../providers/alerts_provider.dart';
+import '../../services/district_service.dart';
 
 class ManageAlerts extends StatefulWidget {
   const ManageAlerts({super.key});
+
   @override
   State<ManageAlerts> createState() => _ManageAlertsState();
 }
 
-class _ManageAlertsState extends State<ManageAlerts>
-    with TickerProviderStateMixin {
-  late AnimationController _bgCtrl;
-  late AnimationController _orbCtrl;
-  late AnimationController _dustCtrl;
-  late Animation<double> _bgAnim;
-  late Animation<double> _orbAnim;
-  late Animation<double> _dustRise;
-  Offset _parallax = Offset.zero;
+class _ManageAlertsState extends State<ManageAlerts> {
+  bool _loading = true;
+  List<QueryDocumentSnapshot> _alerts = [];
 
   @override
   void initState() {
     super.initState();
-    _bgCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 10))..repeat(reverse: true);
-    _bgAnim = CurvedAnimation(parent: _bgCtrl, curve: Curves.easeInOut);
-    _orbCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 14))..repeat(reverse: true);
-    _orbAnim = CurvedAnimation(parent: _orbCtrl, curve: Curves.easeInOut);
-    _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
-    _dustRise = CurvedAnimation(parent: _dustCtrl, curve: Curves.linear);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<AlertsProvider>(context, listen: false).loadAll();
-    });
+    _load();
   }
 
-  @override
-  void dispose() {
-    _bgCtrl.dispose();
-    _orbCtrl.dispose();
-    _dustCtrl.dispose();
-    super.dispose();
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('alerts')
+          .get();
+
+      final docs = snap.docs.toList();
+      docs.sort((a, b) {
+        final ta = (a.data())['createdAt'];
+        final tb = (b.data())['createdAt'];
+        if (ta is Timestamp && tb is Timestamp) return tb.compareTo(ta);
+        return 0;
+      });
+
+      setState(() => _alerts = docs);
+    } catch (e) {
+      _snack('❌ Failed to load: $e', Colors.redAccent);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
-  void _onHover(PointerEvent e, Size size) {
-    final dx = (e.localPosition.dx / size.width - 0.5) * 2;
-    final dy = (e.localPosition.dy / size.height - 0.5) * 2;
-    setState(() => _parallax = Offset(dx, dy));
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // ============================================================
+  // 🆕 NEW ALERT DIALOG
+  // ============================================================
+  Future<void> _showNewAlertDialog() async {
+    final titleCtrl = TextEditingController();
+    final msgCtrl = TextEditingController();
+    String severity = 'Info';
+    bool submitting = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            Future<void> publish() async {
+              if (titleCtrl.text.trim().isEmpty ||
+                  msgCtrl.text.trim().isEmpty) {
+                _snack('Please fill title & message', Colors.orangeAccent);
+                return;
+              }
+
+              setDialogState(() => submitting = true);
+
+              try {
+                await FirebaseFirestore.instance.collection('alerts').add({
+                  'title': titleCtrl.text.trim(),
+                  'message': msgCtrl.text.trim(),
+                  'severity': severity, // 'Info' | 'Warning' | 'Critical'
+                  'district': DistrictService.current ?? '',
+                  'createdAt': Timestamp.now(),
+                  'createdBy': 'admin',
+                });
+
+                if (!mounted) return;
+                Navigator.pop(ctx);
+                _snack('✅ Alert published', const Color(0xFF10B981));
+                _load();
+              } catch (e) {
+                if (!mounted) return;
+                setDialogState(() => submitting = false);
+                _snack('❌ Publish failed: $e', Colors.redAccent);
+              }
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0B1730),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              title: const Text('New Alert',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _field(titleCtrl, 'Title'),
+                    const SizedBox(height: 14),
+                    _field(msgCtrl, 'Message', maxLines: 4),
+                    const SizedBox(height: 14),
+                    Text('Severity',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.65),
+                            fontSize: 12.5)),
+                    const SizedBox(height: 4),
+                    DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: severity,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF1B2B54),
+                        icon: const Icon(Icons.arrow_drop_down,
+                            color: Colors.white70),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600),
+                        items: const [
+                          DropdownMenuItem(value: 'Info', child: Text('Info')),
+                          DropdownMenuItem(
+                              value: 'Warning', child: Text('Warning')),
+                          DropdownMenuItem(
+                              value: 'Critical', child: Text('Critical')),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => severity = v!),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: submitting ? null : () => Navigator.pop(ctx),
+                  child: const Text('Cancel',
+                      style: TextStyle(color: Colors.white70)),
+                ),
+                TextButton(
+                  onPressed: submitting ? null : publish,
+                  child: submitting
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                              color: Color(0xFFEF4444), strokeWidth: 2),
+                        )
+                      : const Text('Publish',
+                          style: TextStyle(
+                              color: Color(0xFFEF4444),
+                              fontWeight: FontWeight.w700)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _field(TextEditingController c, String hint, {int maxLines = 1}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.15)),
+        ),
+        child: TextField(
+          controller: c,
+          maxLines: maxLines,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle:
+                TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+            border: InputBorder.none,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final prov = Provider.of<AlertsProvider>(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFF04060F),
       extendBodyBehindAppBar: true,
@@ -66,295 +212,183 @@ class _ManageAlertsState extends State<ManageAlerts>
         title: const Text('Manage Alerts',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: () => prov.loadAll()),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _load,
+          ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, c) {
-          final size = Size(c.maxWidth, c.maxHeight);
-          return MouseRegion(
-            onHover: (e) => _onHover(e, size),
-            child: AnimatedBuilder(
-              animation: Listenable.merge([_bgAnim, _orbAnim, _dustRise]),
-              builder: (context, _) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _gradientBase(),
-                    _orbs(size),
-                    _dust(size),
-                    SafeArea(bottom: false, child: _body(prov)),
-                  ],
-                );
-              },
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showNewAlertDialog,
+        backgroundColor: const Color(0xFFEF4444),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New Alert',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(-0.4, -0.6),
+            radius: 1.5,
+            colors: [Color(0xFF3A0A18), Color(0xFF16040A), Color(0xFF04060F)],
+            stops: [0.0, 0.55, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.white))
+              : _alerts.isEmpty
+                  ? _emptyState()
+                  : RefreshIndicator(
+                      color: const Color(0xFFEF4444),
+                      backgroundColor: const Color(0xFF0B1730),
+                      onRefresh: _load,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                        itemCount: _alerts.length,
+                        itemBuilder: (context, i) => _alertCard(_alerts[i]),
+                      ),
+                    ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFEF4444).withOpacity(0.15),
+                border: Border.all(
+                    color: const Color(0xFFEF4444).withOpacity(0.5),
+                    width: 1.5),
+              ),
+              child: const Icon(Icons.notifications_active_rounded,
+                  color: Colors.white, size: 40),
             ),
-          );
-        },
-      ),
-      floatingActionButton: _glassFab(context, prov),
-    );
-  }
-
-  Widget _body(AlertsProvider prov) {
-    if (prov.loading) return const Center(child: CircularProgressIndicator(color: Colors.white));
-
-    if (prov.alerts.isEmpty) {
-      return Center(child: Padding(padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.notifications_none_rounded, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          Text('No alerts yet',
-            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 15, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('Tap "New Alert" below to broadcast the first one.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12.5)),
-        ])));
-    }
-
-    return RefreshIndicator(
-      onRefresh: prov.loadAll,
-      color: const Color(0xFFE11D48),
-      backgroundColor: const Color(0xFF0B1730),
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        itemCount: prov.alerts.length,
-        itemBuilder: (context, i) {
-          final d = prov.alerts[i];
-          final data = d.data() as Map<String, dynamic>;
-          return _AlertCard(data: data, onDelete: () => prov.delete(d.id));
-        },
-      ),
-    );
-  }
-
-  Widget _glassFab(BuildContext context, AlertsProvider prov) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8, bottom: 8),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(100),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(100),
-              gradient: const LinearGradient(colors: [Color(0xFFE11D48), Color(0xFFBE123C)]),
-              border: Border.all(color: Colors.white.withOpacity(0.35), width: 1.3),
-              boxShadow: [
-                BoxShadow(color: const Color(0xFFE11D48).withOpacity(0.55), blurRadius: 28, offset: const Offset(0, 10)),
-                BoxShadow(color: Colors.black.withOpacity(0.30), blurRadius: 14, offset: const Offset(0, 6))]),
-            child: Material(color: Colors.transparent,
-              child: InkWell(
-                onTap: () => _openCreate(context, prov),
-                borderRadius: BorderRadius.circular(100),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.add_rounded, color: Colors.white, size: 20),
-                    SizedBox(width: 8),
-                    Text('New Alert',
-                      style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
-                  ]),
-                )))),
-      ),
-      )
-    );
-  }
-
-  Future<void> _openCreate(BuildContext context, AlertsProvider prov) async {
-    final title = TextEditingController();
-    final body = TextEditingController();
-    String severity = 'info';
-
-    await showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: const Color(0xFF0B1730),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('New Alert',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: title,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Title', labelStyle: TextStyle(color: Colors.white.withOpacity(0.70)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.25), width: 1.2)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE11D48), width: 1.4)))),
-            const SizedBox(height: 12),
-            TextField(controller: body, maxLines: 3,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Message', labelStyle: TextStyle(color: Colors.white.withOpacity(0.70)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.25), width: 1.2)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFFE11D48), width: 1.4)))),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: severity,
-              dropdownColor: const Color(0xFF1B2B54),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Severity', labelStyle: TextStyle(color: Colors.white.withOpacity(0.70)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.25), width: 1.2))),
-              items: const [
-                DropdownMenuItem(value: 'info', child: Text('🔵 Info', style: TextStyle(color: Colors.white))),
-                DropdownMenuItem(value: 'warning', child: Text('🟡 Warning', style: TextStyle(color: Colors.white))),
-                DropdownMenuItem(value: 'critical', child: Text('🔴 Critical', style: TextStyle(color: Colors.white))),
-              ],
-              onChanged: (v) => setSt(() => severity = v!)),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70))),
-            TextButton(onPressed: () async {
-              if (title.text.trim().isEmpty) return;
-              await prov.create(title: title.text.trim(), body: body.text.trim(), severity: severity);
-              if (context.mounted) Navigator.pop(context);
-            }, style: TextButton.styleFrom(foregroundColor: const Color(0xFFE11D48)),
-              child: const Text('Publish')),
+            const SizedBox(height: 18),
+            const Text('No alerts yet',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Tap "New Alert" to publish your first alert.',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.55), fontSize: 12.5),
+                textAlign: TextAlign.center),
           ],
         ),
       ),
     );
   }
 
-  Widget _gradientBase() => Container(
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(-0.4 + _bgAnim.value * 0.2, -0.6 + _bgAnim.value * 0.15),
-            radius: 1.5,
-            colors: const [Color(0xFF3A0A18), Color(0xFF16040A), Color(0xFF04060F)],
-            stops: const [0.0, 0.55, 1.0])),
-      );
+  Widget _alertCard(QueryDocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    final title = data['title'] ?? 'Alert';
+    final message = data['message'] ?? '';
+    final severity = data['severity'] ?? 'Info';
+    final createdAt = data['createdAt'];
+    final dateStr = createdAt is Timestamp
+        ? DateFormat('dd MMM yyyy • HH:mm').format(createdAt.toDate())
+        : '';
 
-  Widget _orbs(Size size) => Stack(children: [
-        Positioned(left: -size.width * 0.15 + _parallax.dx * -14,
-          top: -size.height * 0.18 + _parallax.dy * -10,
-          child: _orb(380, const Color(0xFFE11D48), 0.30)),
-        Positioned(right: -size.width * 0.12 + _parallax.dx * 14,
-          bottom: -size.height * 0.15 + _parallax.dy * 10,
-          child: _orb(420, const Color(0xFFF43F5E), 0.24)),
-      ]);
+    final color = severity == 'Critical'
+        ? const Color(0xFFEF4444)
+        : severity == 'Warning'
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFF3B82F6);
 
-  Widget _orb(double size, Color color, double opacity) => IgnorePointer(
-        child: Container(width: size, height: size,
-          decoration: BoxDecoration(shape: BoxShape.circle,
-            gradient: RadialGradient(colors: [
-              color.withOpacity(opacity * (0.85 + _orbAnim.value * 0.3)),
-              color.withOpacity(0.0)]))),
-      );
-
-  Widget _dust(Size size) {
-    final list = <Widget>[];
-    for (int i = 0; i < 18; i++) {
-      final seed = (i * 0.137) % 1.0;
-      final p = (_dustRise.value + seed) % 1.0;
-      final x = size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
-      final y = size.height - p * size.height * 0.9;
-      final opacity = ((1.0 - p) * 0.35).clamp(0.0, 1.0);
-      final r = 1.6 + (i % 3) * 1.4;
-      list.add(Positioned(left: x, top: y,
-        child: IgnorePointer(child: Opacity(opacity: opacity,
-          child: Container(width: r * 2, height: r * 2,
-            decoration: BoxDecoration(shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.55)))))));
-    }
-    return Stack(children: list);
-  }
-}
-
-class _AlertCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final VoidCallback onDelete;
-  const _AlertCard({required this.data, required this.onDelete});
-
-  Color _sevColor(String s) {
-    switch (s) {
-      case 'critical': return const Color(0xFFDC2626);
-      case 'warning': return const Color(0xFFF59E0B);
-      default: return const Color(0xFF3B82F6);
-    }
-  }
-
-  IconData _sevIcon(String s) {
-    switch (s) {
-      case 'critical': return Icons.error_rounded;
-      case 'warning': return Icons.warning_amber_rounded;
-      default: return Icons.info_rounded;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final severity = (data['severity'] ?? 'info').toString();
-    final sevColor = _sevColor(severity);
-    final ts = data['createdAt'];
-    String dateStr = '';
-    if (ts is Timestamp) {
-      dateStr = DateFormat('dd MMM yyyy • HH:mm').format(ts.toDate());
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(20),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
           child: Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: LinearGradient(colors: [
                 Colors.white.withOpacity(0.10),
-                sevColor.withOpacity(0.10)]),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.25), width: 1.2)),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: sevColor.withOpacity(0.18),
-                  border: Border.all(color: sevColor.withOpacity(0.55), width: 1.2),
-                  boxShadow: [BoxShadow(color: sevColor.withOpacity(0.35), blurRadius: 12)]),
-                child: Icon(_sevIcon(severity), color: sevColor, size: 20)),
-              const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(data['title'] ?? 'Untitled',
-                  style: const TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w800, letterSpacing: 0.2)),
-                if ((data['body'] ?? '').toString().isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(data['body'], maxLines: 3, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12.5, height: 1.5)),
+                color.withOpacity(0.08),
+              ]),
+              borderRadius: BorderRadius.circular(20),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.22), width: 1.2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color.withOpacity(0.20),
+                        border:
+                            Border.all(color: color.withOpacity(0.6), width: 1.2),
+                      ),
+                      child:
+                          const Icon(Icons.notifications, color: Colors.white, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(title,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    _pill(severity, color),
+                  ],
+                ),
+                if (message.toString().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(message,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 13,
+                          height: 1.5)),
                 ],
-                const SizedBox(height: 6),
-                Row(children: [
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: sevColor.withOpacity(0.20),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: sevColor.withOpacity(0.55), width: 1)),
-                    child: Text(severity.toUpperCase(),
-                      style: TextStyle(color: sevColor, fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.8))),
-                  if (dateStr.isNotEmpty)
-                    Padding(padding: const EdgeInsets.only(left: 8),
-                      child: Text(dateStr, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10.5))),
-                ]),
-              ])),
-              GestureDetector(onTap: onDelete,
-                child: Container(padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: const Color(0xFFEF4444).withOpacity(0.15),
-                    border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.45), width: 1.1)),
-                  child: const Icon(Icons.delete_rounded, color: Color(0xFFEF4444), size: 16))),
-            ]),
+                if (dateStr.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(dateStr,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.45),
+                          fontSize: 11)),
+                ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  Widget _pill(String text, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.18),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withOpacity(0.65), width: 1),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                color: color,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4)),
+      );
 }

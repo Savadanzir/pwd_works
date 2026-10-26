@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/district_service.dart';
+import '../../widgets/road_logo.dart';
 import '../providers/employee_provider.dart';
 import 'employee_home.dart';
 
@@ -17,6 +19,25 @@ class _EmployeeLoginState extends State<EmployeeLogin>
     with TickerProviderStateMixin {
   final _email = TextEditingController();
   final _pass = TextEditingController();
+
+  String? _selectedDistrict;
+
+  static const List<String> _districts = [
+    'Thiruvananthapuram',
+    'Kollam',
+    'Pathanamthitta',
+    'Alappuzha',
+    'Kottayam',
+    'Idukki',
+    'Ernakulam',
+    'Thrissur',
+    'Palakkad',
+    'Malappuram',
+    'Kozhikode',
+    'Wayanad',
+    'Kannur',
+    'Kasaragod',
+  ];
 
   late AnimationController _bgCtrl;
   late AnimationController _orbCtrl;
@@ -38,6 +59,7 @@ class _EmployeeLoginState extends State<EmployeeLogin>
   @override
   void initState() {
     super.initState();
+    _selectedDistrict = DistrictService.current;
 
     _bgCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 10))
@@ -97,6 +119,50 @@ class _EmployeeLoginState extends State<EmployeeLogin>
     final dx = (e.localPosition.dx / size.width - 0.5) * 2;
     final dy = (e.localPosition.dy / size.height - 0.5) * 2;
     setState(() => _parallax = Offset(dx, dy));
+  }
+
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Future<void> _handleLogin(EmployeeProvider prov) async {
+    if (_selectedDistrict == null) {
+      _snack('Please select a district first', Colors.orangeAccent);
+      return;
+    }
+
+    final err = await prov.login(_email.text.trim(), _pass.text);
+    if (!mounted) return;
+
+    if (err != null) {
+      _snack(err, const Color(0xFFB91C1C));
+      return;
+    }
+
+    final empDistrict = prov.employee?.district ?? '';
+    if (empDistrict.isNotEmpty && empDistrict != _selectedDistrict) {
+      await prov.logout();
+      if (!mounted) return;
+      _snack(
+        'This employee belongs to $empDistrict, but you selected $_selectedDistrict.',
+        const Color(0xFFB91C1C),
+      );
+      return;
+    }
+
+    await DistrictService.set(_selectedDistrict!);
+
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const EmployeeHome()),
+      (_) => false,
+    );
   }
 
   @override
@@ -267,29 +333,15 @@ class _EmployeeLoginState extends State<EmployeeLogin>
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                RotationTransition(
-                    turns: _logoRotate,
-                    child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: const LinearGradient(
-                                colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight),
-                            boxShadow: [
-                              BoxShadow(
-                                  color:
-                                      const Color(0xFFF59E0B).withOpacity(0.55),
-                                  blurRadius: 34,
-                                  spreadRadius: 3)
-                            ]),
-                        child: const Icon(Icons.engineering_rounded,
-                            size: 52, color: Colors.white))),
-                const SizedBox(height: 22),
+                // 👇 Logo
+                const RoadLogo(
+                  width: 220,
+                  glowColor: Color(0xFFF59E0B),
+                ),
+                const SizedBox(height: 20),
                 const Text('Employee Login',
                     style: TextStyle(
-                        fontSize: 24,
+                        fontSize: 22,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
                         letterSpacing: 0.3,
@@ -300,13 +352,21 @@ class _EmployeeLoginState extends State<EmployeeLogin>
                               offset: Offset(0, 2))
                         ])),
                 const SizedBox(height: 6),
-                Text('Sign in with your assigned credentials',
-                    style: TextStyle(
-                        fontSize: 13, color: Colors.white.withOpacity(0.70))),
+                Text(
+                  _selectedDistrict == null
+                      ? 'Select your district to continue'
+                      : 'District: $_selectedDistrict',
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.70),
+                      fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 26),
                 SlideTransition(
                     position: _formSlide,
                     child: Column(children: [
+                      _districtDropdown(),
+                      const SizedBox(height: 14),
                       _glassField(_email, 'Email', Icons.email_rounded,
                           keyboard: TextInputType.emailAddress),
                       const SizedBox(height: 14),
@@ -318,6 +378,65 @@ class _EmployeeLoginState extends State<EmployeeLogin>
                       _infoPill()
                     ])),
               ]),
+            ),
+          ),
+        ),
+      );
+
+  Widget _districtDropdown() => ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.white.withOpacity(0.10),
+                Colors.white.withOpacity(0.04),
+              ]),
+              borderRadius: BorderRadius.circular(16),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedDistrict,
+                isExpanded: true,
+                dropdownColor: const Color(0xFF1B2B54),
+                icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white),
+                hint: Row(
+                  children: [
+                    Icon(Icons.location_city_rounded,
+                        color: Colors.white.withOpacity(0.85), size: 20),
+                    const SizedBox(width: 12),
+                    Text('Select your district',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 14.5)),
+                  ],
+                ),
+                selectedItemBuilder: (context) => _districts
+                    .map((d) => Row(children: [
+                          Icon(Icons.location_city_rounded,
+                              color: Colors.white.withOpacity(0.85), size: 20),
+                          const SizedBox(width: 12),
+                          Text(d,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500)),
+                        ]))
+                    .toList(),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500),
+                items: _districts
+                    .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedDistrict = v),
+              ),
             ),
           ),
         ),
@@ -362,22 +481,7 @@ class _EmployeeLoginState extends State<EmployeeLogin>
   }
 
   Widget _primaryButton(EmployeeProvider prov) => GestureDetector(
-        onTap: prov.loading
-            ? null
-            : () async {
-                final err = await prov.login(_email.text.trim(), _pass.text);
-                if (err == null && mounted) {
-                  Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const EmployeeHome()),
-                      (_) => false);
-                } else if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(err ?? 'Login failed'),
-                      backgroundColor: const Color(0xFFB91C1C),
-                      behavior: SnackBarBehavior.floating));
-                }
-              },
+        onTap: prov.loading ? null : () => _handleLogin(prov),
         child: Container(
           height: 58,
           width: double.infinity,

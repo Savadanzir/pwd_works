@@ -4,8 +4,15 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:road_maintenance/services/settings_service.dart';
 
 import 'firebase_options.dart';
+
+// ============================================================
+// DISTRICT
+// ============================================================
+import 'services/district_selection.dart';
+import 'services/district_service.dart';
 
 // ============================================================
 // USER MODULE
@@ -48,6 +55,11 @@ import 'employee/providers/leave_request_provider.dart';
 import 'employee/providers/emergency_provider.dart';
 import 'employee/screens/employee_login.dart';
 
+// ============================================================
+// WIDGETS
+// ============================================================
+import 'widgets/road_logo.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -77,6 +89,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MetroUpdateProvider()),
         ChangeNotifierProvider(create: (_) => TrafficProvider()),
         ChangeNotifierProvider(create: (_) => BestRouteProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsService()..load()),
 
         // ============ ADMIN MODULE ============
         ChangeNotifierProvider(create: (_) => AdminProvider()),
@@ -110,29 +123,61 @@ class MyApp extends StatelessWidget {
           primarySwatch: Colors.blue,
           scaffoldBackgroundColor: const Color(0xFF04060F),
         ),
-        home: const PlatformGate(),
+        home: const DistrictGate(),
       ),
     );
   }
 }
 
-/// 🌐 Platform-aware entry point
-///
-/// 📱 Mobile  → User login (default app for citizens)
-/// 🖥️ Web     → Admin / Employee portal (staff only)
+// ============================================================
+// 🌐 DISTRICT GATE
+// ============================================================
+class DistrictGate extends StatelessWidget {
+  const DistrictGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: DistrictService.load(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF04060F),
+            body: Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          );
+        }
+        if (snapshot.data == null) {
+          return const DistrictSelection();
+        }
+        return const PlatformGate();
+      },
+    );
+  }
+}
+
+// ============================================================
+// 🌐 PLATFORM GATE
+// 📱 Mobile  → User login ONLY
+// 🖥️ Web     → Admin & Employee login ONLY
+// ============================================================
 class PlatformGate extends StatelessWidget {
   const PlatformGate({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) return const WebPortalScreen();
-    return const UserLogin();
+    // If Mobile -> Go straight to User Login
+    if (!kIsWeb) {
+      return const UserLogin();
+    }
+    // If Web -> Show the Web Portal (Admin & Employee)
+    return const WebPortalScreen();
   }
 }
 
 // ============================================================
-// 🖥️ Web Portal — Admin + Employee ONLY (no User)
-// 🎨 Full glass aurora background with animations
+// 🖥️ Web Portal — Admin + Employee Only
 // ============================================================
 class WebPortalScreen extends StatefulWidget {
   const WebPortalScreen({super.key});
@@ -142,7 +187,6 @@ class WebPortalScreen extends StatefulWidget {
 
 class _WebPortalScreenState extends State<WebPortalScreen>
     with TickerProviderStateMixin {
-  // ---- Animations ----
   late AnimationController _bgCtrl;
   late AnimationController _orbCtrl;
   late AnimationController _dustCtrl;
@@ -297,11 +341,6 @@ class _WebPortalScreenState extends State<WebPortalScreen>
           bottom: -size.height * 0.15 + _parallax.dy * 10,
           child: _orb(420, const Color(0xFF8B5CF6), 0.24),
         ),
-        Positioned(
-          right: size.width * 0.10 + _parallax.dx * 8,
-          top: size.height * 0.20 + _parallax.dy * 6,
-          child: _orb(220, const Color(0xFF06B6D4), 0.22),
-        ),
       ],
     );
   }
@@ -329,8 +368,8 @@ class _WebPortalScreenState extends State<WebPortalScreen>
     for (int i = 0; i < 18; i++) {
       final seed = (i * 0.137) % 1.0;
       final p = (_dustRise.value + seed) % 1.0;
-      final x = size.width * (0.05 + (i % 9) * 0.11) +
-          math.sin((p + i) * 5) * 20;
+      final x =
+          size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
       final y = size.height - p * size.height * 0.9;
       final opacity = ((1.0 - p) * 0.35).clamp(0.0, 1.0);
       final r = 1.6 + (i % 3) * 1.4;
@@ -404,56 +443,14 @@ class _WebPortalScreenState extends State<WebPortalScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Logo badge
-                RotationTransition(
-                  turns: _logoRotate,
-                  child: Container(
-                    padding: const EdgeInsets.all(22),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(28),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF3B82F6).withOpacity(0.55),
-                          blurRadius: 40,
-                          spreadRadius: 4,
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.construction,
-                      size: 44,
-                      color: Colors.white,
-                    ),
-                  ),
+                // Logo
+                const RoadLogo(
+                  width: 240,
+                  glowColor: Color(0xFFF59E0B),
                 ),
-
-                const SizedBox(height: 22),
-
-                const Text(
-                  'Road Maintenance',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: 0.3,
-                    shadows: [
-                      Shadow(
-                        color: Color(0x88000000),
-                        blurRadius: 16,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
                 Text(
-                  'S T A F F   P O R T A L',
+                  'W E B   P O R T A L',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 11,
@@ -481,7 +478,7 @@ class _WebPortalScreenState extends State<WebPortalScreen>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'For Admin & Employee access only',
+                  'Choose your role to continue',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.75),
                     fontSize: 13,
@@ -489,9 +486,9 @@ class _WebPortalScreenState extends State<WebPortalScreen>
                 ),
                 const SizedBox(height: 30),
 
-                // ---- Admin Button ----
+                // ---- ADMIN Button ----
                 _AnimatedEntry(
-                  delay: 200,
+                  delay: 120,
                   child: _WebRoleButton(
                     icon: Icons.admin_panel_settings_rounded,
                     label: 'Admin Login',
@@ -499,16 +496,15 @@ class _WebPortalScreenState extends State<WebPortalScreen>
                     colors: const [Color(0xFF3B82F6), Color(0xFF6366F1)],
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const AdminLogin()),
+                      MaterialPageRoute(builder: (_) => const AdminLogin()),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // ---- Employee Button ----
+                // ---- EMPLOYEE Button ----
                 _AnimatedEntry(
-                  delay: 340,
+                  delay: 260,
                   child: _WebRoleButton(
                     icon: Icons.engineering_rounded,
                     label: 'Employee Login',
@@ -516,43 +512,8 @@ class _WebPortalScreenState extends State<WebPortalScreen>
                     colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const EmployeeLogin()),
+                      MaterialPageRoute(builder: (_) => const EmployeeLogin()),
                     ),
-                  ),
-                ),
-
-                const SizedBox(height: 28),
-
-                // ---- Info note ----
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.18),
-                      width: 1.1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.phone_android,
-                          color: Colors.white.withOpacity(0.75),
-                          size: 16),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'User app is mobile-only. Download the '
-                          'Road Maintenance app on your phone to report issues.',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.70),
-                            fontSize: 11.5,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
               ],
@@ -565,7 +526,7 @@ class _WebPortalScreenState extends State<WebPortalScreen>
 }
 
 // ============================================================
-// 🎯 Web role button — glass pill with icon
+// 🎯 Web role button
 // ============================================================
 class _WebRoleButton extends StatefulWidget {
   final IconData icon;
@@ -648,7 +609,6 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                 ),
                 child: Stack(
                   children: [
-                    // Top shine
                     Positioned(
                       top: 0,
                       left: 28,
@@ -666,7 +626,6 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                         ),
                       ),
                     ),
-                    // Left accent strip
                     Positioned(
                       left: 0,
                       top: 0,
@@ -684,12 +643,10 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                         ),
                       ),
                     ),
-                    // Content
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 18),
                       child: Row(
                         children: [
-                          // Icon badge
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 220),
                             width: _hover ? 54 : 50,
@@ -703,8 +660,7 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: accent.withOpacity(
-                                      _hover ? 0.8 : 0.5),
+                                  color: accent.withOpacity(_hover ? 0.8 : 0.5),
                                   blurRadius: _hover ? 22 : 14,
                                   spreadRadius: 1,
                                 ),
@@ -714,7 +670,6 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                                 color: Colors.white, size: 26),
                           ),
                           const SizedBox(width: 16),
-                          // Text
                           Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -748,12 +703,10 @@ class _WebRoleButtonState extends State<_WebRoleButton> {
                               ],
                             ),
                           ),
-                          // Arrow
                           AnimatedSlide(
                             duration: const Duration(milliseconds: 220),
-                            offset: _hover
-                                ? const Offset(0.15, 0)
-                                : Offset.zero,
+                            offset:
+                                _hover ? const Offset(0.15, 0) : Offset.zero,
                             child: Icon(
                               Icons.arrow_forward_rounded,
                               color: Colors.white.withOpacity(0.9),

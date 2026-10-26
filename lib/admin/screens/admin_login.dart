@@ -3,9 +3,11 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:road_maintenance/admin/screens/admin_defaults.dart';
 
+import '../../services/district_service.dart';
+import '../../widgets/road_logo.dart';
 import '../providers/admin_provider.dart';
+import 'admin_defaults.dart';
 import 'admin_home.dart';
 
 class AdminLogin extends StatefulWidget {
@@ -18,6 +20,25 @@ class _AdminLoginState extends State<AdminLogin>
     with TickerProviderStateMixin {
   late final TextEditingController _email;
   late final TextEditingController _pass;
+
+  String? _selectedDistrict = 'Ernakulam';
+
+  static const List<String> _districts = [
+    'Thiruvananthapuram',
+    'Kollam',
+    'Pathanamthitta',
+    'Alappuzha',
+    'Kottayam',
+    'Idukki',
+    'Ernakulam',
+    'Thrissur',
+    'Palakkad',
+    'Malappuram',
+    'Kozhikode',
+    'Wayanad',
+    'Kannur',
+    'Kasaragod',
+  ];
 
   late AnimationController _bgCtrl;
   late AnimationController _orbCtrl;
@@ -39,28 +60,44 @@ class _AdminLoginState extends State<AdminLogin>
   @override
   void initState() {
     super.initState();
-    _email = TextEditingController(text: AdminDefaults.email);
-    _pass = TextEditingController(text: AdminDefaults.password);
 
-    _bgCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 10))..repeat(reverse: true);
+    final creds = AdminDefaults.byDistrict[_selectedDistrict!];
+    _email = TextEditingController(text: creds?['email'] ?? '');
+    _pass = TextEditingController(text: creds?['password'] ?? '');
+
+    _bgCtrl = AnimationController(
+        vsync: this, duration: const Duration(seconds: 10))
+      ..repeat(reverse: true);
     _bgAnim = CurvedAnimation(parent: _bgCtrl, curve: Curves.easeInOut);
 
-    _orbCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 14))..repeat(reverse: true);
+    _orbCtrl = AnimationController(
+        vsync: this, duration: const Duration(seconds: 14))
+      ..repeat(reverse: true);
     _orbAnim = CurvedAnimation(parent: _orbCtrl, curve: Curves.easeInOut);
 
-    _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
+    _dustCtrl = AnimationController(
+        vsync: this, duration: const Duration(seconds: 6))
+      ..repeat();
     _dustRise = CurvedAnimation(parent: _dustCtrl, curve: Curves.linear);
 
-    _cardCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
-    _cardScale = Tween<double>(begin: 0.9, end: 1.0).animate(CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
-    _cardFade = CurvedAnimation(parent: _cardCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
+    _cardCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1000));
+    _cardScale = Tween<double>(begin: 0.9, end: 1.0).animate(
+        CurvedAnimation(parent: _cardCtrl, curve: Curves.easeOutCubic));
+    _cardFade = CurvedAnimation(
+        parent: _cardCtrl,
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
 
-    _logoCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
-    _logoRotate = Tween<double>(begin: -0.15, end: 0.0).animate(CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
+    _logoCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1200));
+    _logoRotate = Tween<double>(begin: -0.15, end: 0.0).animate(
+        CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
 
-    _formCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _formCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
     _formSlide = Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _formCtrl, curve: Curves.easeOutCubic));
+        .animate(CurvedAnimation(
+            parent: _formCtrl, curve: Curves.easeOutCubic));
 
     _cardCtrl.forward();
     _logoCtrl.forward();
@@ -86,6 +123,73 @@ class _AdminLoginState extends State<AdminLogin>
     final dx = (e.localPosition.dx / size.width - 0.5) * 2;
     final dy = (e.localPosition.dy / size.height - 0.5) * 2;
     setState(() => _parallax = Offset(dx, dy));
+  }
+
+  void _onDistrictChanged(String? district) {
+    setState(() {
+      _selectedDistrict = district;
+      final creds =
+          district != null ? AdminDefaults.byDistrict[district] : null;
+      _email.text = creds?['email'] ?? '';
+      _pass.text = creds?['password'] ?? '';
+    });
+  }
+
+  Future<void> _handleLogin(AdminProvider prov) async {
+    if (_selectedDistrict == null) {
+      _snack('Please select a district first', Colors.orangeAccent);
+      return;
+    }
+
+    final creds = AdminDefaults.byDistrict[_selectedDistrict!];
+    if (creds == null) {
+      _snack('No credentials configured for this district', Colors.redAccent);
+      return;
+    }
+
+    final err = await prov.loginOrCreateForDistrict(
+      district: _selectedDistrict!,
+      email: creds['email'] ?? '',
+      password: creds['password'] ?? '',
+      name: creds['name'] ?? '${_selectedDistrict!} Admin',
+    );
+
+    if (!mounted) return;
+
+    if (err != null) {
+      _snack(err, const Color(0xFFB91C1C));
+      return;
+    }
+
+    final adminDistrict = prov.admin?.district ?? '';
+    if (adminDistrict.isNotEmpty && adminDistrict != _selectedDistrict) {
+      await prov.logout();
+      if (!mounted) return;
+      _snack(
+        'This admin belongs to $adminDistrict, but you selected $_selectedDistrict.',
+        const Color(0xFFB91C1C),
+      );
+      return;
+    }
+
+    await DistrictService.set(_selectedDistrict!);
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const AdminHome()),
+    );
+  }
+
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -137,7 +241,8 @@ class _AdminLoginState extends State<AdminLogin>
                             child: ScaleTransition(
                               scale: _cardScale,
                               child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 440),
+                                constraints:
+                                    const BoxConstraints(maxWidth: 440),
                                 child: _glassCard(prov),
                               ),
                             ),
@@ -158,9 +263,14 @@ class _AdminLoginState extends State<AdminLogin>
   Widget _gradientBase() => Container(
         decoration: BoxDecoration(
           gradient: RadialGradient(
-            center: Alignment(-0.4 + _bgAnim.value * 0.2, -0.6 + _bgAnim.value * 0.15),
+            center: Alignment(
+                -0.4 + _bgAnim.value * 0.2, -0.6 + _bgAnim.value * 0.15),
             radius: 1.5,
-            colors: const [Color(0xFF0B1130), Color(0xFF060A1E), Color(0xFF04060F)],
+            colors: const [
+              Color(0xFF0B1130),
+              Color(0xFF060A1E),
+              Color(0xFF04060F)
+            ],
             stops: const [0.0, 0.55, 1.0],
           ),
         ),
@@ -200,21 +310,27 @@ class _AdminLoginState extends State<AdminLogin>
     for (int i = 0; i < 18; i++) {
       final seed = (i * 0.137) % 1.0;
       final p = (_dustRise.value + seed) % 1.0;
-      final x = size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
+      final x =
+          size.width * (0.05 + (i % 9) * 0.11) + math.sin((p + i) * 5) * 20;
       final y = size.height - p * size.height * 0.9;
       final opacity = ((1.0 - p) * 0.35).clamp(0.0, 1.0);
       final r = 1.6 + (i % 3) * 1.4;
       list.add(Positioned(
-        left: x, top: y,
+        left: x,
+        top: y,
         child: IgnorePointer(
           child: Opacity(
             opacity: opacity,
             child: Container(
-              width: r * 2, height: r * 2,
+              width: r * 2,
+              height: r * 2,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.55),
-                boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.30), blurRadius: 6)],
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.white.withOpacity(0.30), blurRadius: 6)
+                ],
               ),
             ),
           ),
@@ -241,57 +357,69 @@ class _AdminLoginState extends State<AdminLogin>
                 stops: const [0.0, 0.5, 1.0],
               ),
               borderRadius: BorderRadius.circular(32),
-              border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.3),
+              border: Border.all(
+                  color: Colors.white.withOpacity(0.18), width: 1.3),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 60, offset: const Offset(0, 28)),
-                BoxShadow(color: const Color(0xFF3B82F6).withOpacity(0.28), blurRadius: 50, offset: const Offset(0, 12)),
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.55),
+                    blurRadius: 60,
+                    offset: const Offset(0, 28)),
+                BoxShadow(
+                    color: const Color(0xFF3B82F6).withOpacity(0.28),
+                    blurRadius: 50,
+                    offset: const Offset(0, 12)),
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  RotationTransition(
-                    turns: _logoRotate,
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        boxShadow: [
-                          BoxShadow(color: const Color(0xFF3B82F6).withOpacity(0.55), blurRadius: 34, spreadRadius: 3),
-                        ],
-                      ),
-                      child: const Icon(Icons.admin_panel_settings_rounded, size: 52, color: Colors.white),
-                    ),
+                  // 👇 Logo
+                  const RoadLogo(
+                    width: 220,
+                    glowColor: Color(0xFF3B82F6),
                   ),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 20),
                   const Text(
                     'Admin Login',
                     style: TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.w800,
-                      color: Colors.white, letterSpacing: 0.3,
-                      shadows: [Shadow(color: Color(0x88000000), blurRadius: 12, offset: Offset(0, 2))],
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 0.3,
+                      shadows: [
+                        Shadow(
+                            color: Color(0x88000000),
+                            blurRadius: 12,
+                            offset: Offset(0, 2)),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Default credentials are pre-filled',
-                    style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.70)),
+                    _selectedDistrict == null
+                        ? 'Select your district to continue'
+                        : 'District: $_selectedDistrict',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.70),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 26),
                   SlideTransition(
                     position: _formSlide,
                     child: Column(
                       children: [
-                        _glassField(_email, 'Admin Email', Icons.email_rounded, keyboard: TextInputType.emailAddress),
+                        _districtDropdown(),
                         const SizedBox(height: 14),
-                        _glassField(_pass, 'Password', Icons.lock_rounded, obscure: true),
+                        _glassField(_email, 'Admin Email', Icons.email_rounded,
+                            keyboard: TextInputType.emailAddress),
+                        const SizedBox(height: 14),
+                        _glassField(_pass, 'Password', Icons.lock_rounded,
+                            obscure: true),
                         const SizedBox(height: 26),
                         _primaryButton(prov),
                         const SizedBox(height: 18),
@@ -306,6 +434,72 @@ class _AdminLoginState extends State<AdminLogin>
         ),
       );
 
+  Widget _districtDropdown() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [
+              Colors.white.withOpacity(0.10),
+              Colors.white.withOpacity(0.04),
+            ]),
+            borderRadius: BorderRadius.circular(16),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedDistrict,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1B2B54),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: Colors.white),
+              hint: Row(
+                children: [
+                  Icon(Icons.location_city_rounded,
+                      color: Colors.white.withOpacity(0.85), size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Choose your district',
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55),
+                        fontSize: 14.5),
+                  ),
+                ],
+              ),
+              selectedItemBuilder: (context) => _districts
+                  .map((d) => Row(
+                        children: [
+                          Icon(Icons.location_city_rounded,
+                              color: Colors.white.withOpacity(0.85),
+                              size: 20),
+                          const SizedBox(width: 12),
+                          Text(d,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500)),
+                        ],
+                      ))
+                  .toList(),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500),
+              items: _districts
+                  .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+                  .toList(),
+              onChanged: _onDistrictChanged,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _glassField(TextEditingController c, String hint, IconData icon,
       {bool obscure = false, TextInputType? keyboard}) {
     return ClipRRect(
@@ -319,20 +513,25 @@ class _AdminLoginState extends State<AdminLogin>
               Colors.white.withOpacity(0.04),
             ]),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+            border: Border.all(
+                color: Colors.white.withOpacity(0.28), width: 1.2),
           ),
           child: TextField(
             controller: c,
             obscureText: obscure,
             keyboardType: keyboard,
-            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
             cursorColor: const Color(0xFF60A5FA),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 14.5),
-              prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.85), size: 20),
+              hintStyle: TextStyle(
+                  color: Colors.white.withOpacity(0.55), fontSize: 14.5),
+              prefixIcon:
+                  Icon(icon, color: Colors.white.withOpacity(0.85), size: 20),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+              contentPadding:
+                  const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
             ),
           ),
         ),
@@ -341,46 +540,39 @@ class _AdminLoginState extends State<AdminLogin>
   }
 
   Widget _primaryButton(AdminProvider prov) => GestureDetector(
-        onTap: prov.loading
-            ? null
-            : () async {
-                final err = await prov.login(_email.text.trim(), _pass.text);
-                if (err == null && mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AdminHome()),
-                  );
-                } else if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(err ?? 'Login failed'),
-                      backgroundColor: const Color(0xFFB91C1C),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
+        onTap: prov.loading ? null : () => _handleLogin(prov),
         child: Container(
           height: 58,
           width: double.infinity,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: const LinearGradient(colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)]),
+            gradient: const LinearGradient(
+                colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)]),
             boxShadow: [
-              BoxShadow(color: const Color(0xFF3B82F6).withOpacity(0.55), blurRadius: 26, offset: const Offset(0, 10)),
+              BoxShadow(
+                  color: const Color(0xFF3B82F6).withOpacity(0.55),
+                  blurRadius: 26,
+                  offset: const Offset(0, 10)),
             ],
           ),
           child: Center(
             child: prov.loading
                 ? const SizedBox(
-                    height: 22, width: 22,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
                 : const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('Login', style: TextStyle(color: Colors.white, fontSize: 16.5, fontWeight: FontWeight.w700)),
+                      Text('Login',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w700)),
                       SizedBox(width: 10),
-                      Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
+                      Icon(Icons.arrow_forward_rounded,
+                          color: Colors.white, size: 20),
                     ],
                   ),
           ),
@@ -399,7 +591,8 @@ class _AdminLoginState extends State<AdminLogin>
                 const Color(0xFF3B82F6).withOpacity(0.08),
               ]),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withOpacity(0.22), width: 1.1),
+              border: Border.all(
+                  color: Colors.white.withOpacity(0.22), width: 1.1),
             ),
             child: Row(
               children: [
@@ -408,15 +601,21 @@ class _AdminLoginState extends State<AdminLogin>
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFF3B82F6).withOpacity(0.20),
-                    border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.55), width: 1.2),
+                    border: Border.all(
+                        color: const Color(0xFF3B82F6).withOpacity(0.55),
+                        width: 1.2),
                   ),
-                  child: const Icon(Icons.info_outline_rounded, color: Color(0xFF60A5FA), size: 14),
+                  child: const Icon(Icons.info_outline_rounded,
+                      color: Color(0xFF60A5FA), size: 14),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Default admin account is auto-created on first login.',
-                    style: TextStyle(color: Colors.white.withOpacity(0.80), fontSize: 11.5, height: 1.4),
+                    'Admin must belong to the selected district.',
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.80),
+                        fontSize: 11.5,
+                        height: 1.4),
                   ),
                 ),
               ],

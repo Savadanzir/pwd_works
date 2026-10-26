@@ -4,6 +4,7 @@ class EmployeeModel {
   final String email;
   final String phone;
   final String department;
+  final String district; // 👈 NEW
 
   EmployeeModel({
     required this.uid,
@@ -11,6 +12,7 @@ class EmployeeModel {
     required this.email,
     required this.phone,
     required this.department,
+    this.district = '',
   });
 
   Map<String, dynamic> toMap() => {
@@ -19,6 +21,7 @@ class EmployeeModel {
         'email': email,
         'phone': phone,
         'department': department,
+        'district': district,
         'role': 'employee',
       };
 
@@ -28,5 +31,6 @@ class EmployeeModel {
         email: m['email'] ?? '',
         phone: m['phone'] ?? '',
         department: m['department'] ?? '',
+        district: m['district'] ?? '',
       );
 }
