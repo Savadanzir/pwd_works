@@ -141,6 +141,9 @@ class FirestoreService {
   Future<void> updateReport(String id, Map<String, dynamic> data) =>
       _db.collection('reports').doc(id).update(data);
 
+  /// Titles alone are not treated as duplicates.
+  Future<bool> reportAlreadyExists(String title) async => false;
+
   // ============================================================
   // 🔍 DUPLICATE DETECTION (Duplicate Image from Multiple Users)
   // ============================================================
