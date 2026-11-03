@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/firestore_service.dart';
 import '../../services/geocoding_service.dart';
+import '../../services/image_hash_service.dart';
 import '../../services/location_service.dart';
 import '../providers/employee_provider.dart';
 
@@ -123,6 +124,13 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
     setState(() => _submitting = true);
 
     String? imageUrl;
+    String? imageSha256;
+    String? imageDHash;
+
+    if (_imageBytes != null) {
+      imageSha256 = ImageHashService.computeSha256(_imageBytes!);
+      imageDHash = ImageHashService.computeDHash(_imageBytes!);
+    }
 
     // 1. Try uploading the image — but do NOT fail the whole report if it times out
     if (_imageBytes != null) {
@@ -172,6 +180,8 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
         'latitude': _lat,
         'longitude': _lng,
         'imageUrl': imageUrl,
+        'imageSha256': imageSha256,
+        'imageDHash': imageDHash,
         'status': 'Approved',
         'createdAt': Timestamp.now(),
         'supporters': <String>[emp?.uid ?? ''],

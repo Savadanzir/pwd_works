@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'image_hash_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -140,58 +141,66 @@ class FirestoreService {
   Future<void> updateReport(String id, Map<String, dynamic> data) =>
       _db.collection('reports').doc(id).update(data);
 
-  Future<bool> reportAlreadyExists(String title) async {
-    final normalized = title.trim().toLowerCase();
-    final snap = await _db.collection('reports').get();
-    for (final doc in snap.docs) {
-      final data = doc.data();
-      final existing = (data['title'] ?? '').toString().trim().toLowerCase();
-      final status = data['status'] ?? '';
-      if (existing == normalized && status != 'Rejected') {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  Future<QueryDocumentSnapshot?> findDuplicateReport({
-    required String title,
-    required String category,
-    double? latitude,
-    double? longitude,
+  // ============================================================
+  // 🔍 DUPLICATE DETECTION (Duplicate Image from Multiple Users)
+  // ============================================================
+  /// Returns existing report ONLY when duplicate image is recognized from another user.
+  /// If no duplicate image from other users, returns null (so report goes to Admin).
+  Future<QueryDocumentSnapshot?> findDuplicateImageReport({
+    required String currentUserId,
+    required String? imageSha256,
+    required String? imageDHash,
   }) async {
-    final normalizedTitle = title.trim().toLowerCase();
+    // If no image is provided, it cannot be a duplicate image!
+    if ((imageSha256 == null || imageSha256.isEmpty) &&
+        (imageDHash == null || imageDHash.isEmpty)) {
+      return null;
+    }
 
-    final snap = await _db
-        .collection('reports')
-        .where('category', isEqualTo: category)
-        .get();
+    final snap = await _db.collection('reports').get();
 
     for (final doc in snap.docs) {
       final data = doc.data();
 
+      // Only flag as duplicate if submitted by ANOTHER user (from multiple users)
+      final authorId = (data['userId'] ?? '').toString();
+      if (authorId == currentUserId) continue;
+
+      // Skip rejected reports
       final status = (data['status'] ?? '').toString();
       if (status == 'Rejected') continue;
 
-      final existingTitle =
-          (data['title'] ?? '').toString().trim().toLowerCase();
-      final existingLat = data['latitude'];
-      final existingLng = data['longitude'];
+      final existingSha = data['imageSha256'] as String?;
+      final existingDHash = data['imageDHash'] as String?;
 
-      if (existingTitle.isNotEmpty && existingTitle == normalizedTitle) {
+      if (ImageHashService.isDuplicate(
+        sha1: imageSha256,
+        sha2: existingSha,
+        dHash1: imageDHash,
+        dHash2: existingDHash,
+      )) {
         return doc;
       }
+    }
+    return null;
+  }
 
-      if (latitude != null &&
-          longitude != null &&
-          existingLat is num &&
-          existingLng is num) {
-        final dLat = (existingLat - latitude).abs();
-        final dLng = (existingLng - longitude).abs();
-        if (dLat < 0.0005 && dLng < 0.0005) {
-          return doc;
-        }
-      }
+  /// Backward compatible findDuplicateReport: strictly delegates to image-based check
+  Future<QueryDocumentSnapshot?> findDuplicateReport({
+    String? title,
+    String? category,
+    double? latitude,
+    double? longitude,
+    String? currentUserId,
+    String? imageSha256,
+    String? imageDHash,
+  }) async {
+    if (currentUserId != null) {
+      return findDuplicateImageReport(
+        currentUserId: currentUserId,
+        imageSha256: imageSha256,
+        imageDHash: imageDHash,
+      );
     }
     return null;
   }

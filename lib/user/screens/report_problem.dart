@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/firestore_service.dart';
 import '../../services/geocoding_service.dart';
+import '../../services/image_hash_service.dart';
 import '../../services/location_service.dart';
 import '../providers/user_provider.dart';
 
@@ -130,7 +132,7 @@ class _ReportProblemState extends State<ReportProblem> {
   }
 
   // ============================================================
-  // 🚀 SUBMIT — with duplicate check & resilient image upload
+  // 🚀 SUBMIT — duplicate check ONLY on duplicate image recognition
   // ============================================================
   Future<void> _submit() async {
     if (_submitting) return;
@@ -173,38 +175,53 @@ class _ReportProblemState extends State<ReportProblem> {
         } catch (_) {}
       }
 
-      // 1️⃣ Check for duplicates
-      final duplicate = await fs.findDuplicateReport(
-        title: _title.text.trim(),
-        category: _category,
-        latitude: _lat,
-        longitude: _lng,
-      );
-
-      if (duplicate != null) {
-        if (!mounted) return;
-        setState(() => _submitting = false);
-
-        // Show the "already reported" dialog
-        final support = await _showDuplicateDialog();
-        if (support == true) {
-          // Support the existing report
-          await fs.supportReport(duplicate.id, userId);
-          if (!mounted) return;
-          _showInfo('You are now supporting the existing report.');
-          Navigator.pop(context);
-        }
-        return;
+      // Read image bytes for hashing & upload
+      Uint8List? imageBytes;
+      if (kIsWeb && _webImage != null) {
+        imageBytes = await _webImage!.readAsBytes();
+      } else if (!kIsWeb && _image != null) {
+        imageBytes = await _image!.readAsBytes();
       }
 
-      // 2️⃣ Upload image (with fallback so report submission ALWAYS succeeds)
+      String? imageSha256;
+      String? imageDHash;
+      if (imageBytes != null) {
+        imageSha256 = ImageHashService.computeSha256(imageBytes);
+        imageDHash = ImageHashService.computeDHash(imageBytes);
+      }
+
+      // 1️⃣ Check for duplicates ONLY when a duplicate image is recognized from another user
+      if (imageSha256 != null || imageDHash != null) {
+        final duplicate = await fs.findDuplicateImageReport(
+          currentUserId: userId,
+          imageSha256: imageSha256,
+          imageDHash: imageDHash,
+        );
+
+        if (duplicate != null) {
+          if (!mounted) return;
+          setState(() => _submitting = false);
+
+          // Show the "Already Reported" dialog
+          final support = await _showDuplicateDialog();
+          if (support == true) {
+            // Support the existing report
+            await fs.supportReport(duplicate.id, userId);
+            if (!mounted) return;
+            _showInfo('You are now supporting the existing report.');
+            Navigator.pop(context);
+          }
+          return;
+        }
+      }
+
+      // 2️⃣ Upload image (with safe fallback so report submission always succeeds)
       String? imageUrl;
       bool imageFailed = false;
-      if (kIsWeb && _webImage != null) {
+      if (kIsWeb && _webImage != null && imageBytes != null) {
         try {
-          final bytes = await _webImage!.readAsBytes();
           imageUrl = await fs.uploadImageBytes(
-            bytes,
+            imageBytes,
             'reports/${DateTime.now().millisecondsSinceEpoch}_${_webImage!.name}',
           );
         } catch (e) {
@@ -225,7 +242,7 @@ class _ReportProblemState extends State<ReportProblem> {
         }
       }
 
-      // 3️⃣ Save new report to Firestore (sent directly to Admin Applications)
+      // 3️⃣ Save new report to Firestore (sent directly to Admin Applications for approval)
       await fs.addReport({
         'userId': userId,
         'userName': userName,
@@ -237,6 +254,8 @@ class _ReportProblemState extends State<ReportProblem> {
         'latitude': _lat,
         'longitude': _lng,
         'imageUrl': imageUrl,
+        'imageSha256': imageSha256,
+        'imageDHash': imageDHash,
         'status': 'Pending',
         'supporters': <String>[userId],
         'createdAt': Timestamp.now(),
