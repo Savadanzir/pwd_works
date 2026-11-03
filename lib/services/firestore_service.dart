@@ -154,70 +154,45 @@ class FirestoreService {
     return false;
   }
 
-  // ============================================================
-  // 🕵️ DUPLICATE CHECK LOGIC (Distance-based)
-  // ============================================================
   Future<QueryDocumentSnapshot?> findDuplicateReport({
     required String title,
     required String category,
     double? latitude,
     double? longitude,
   }) async {
-    // 1. If no GPS, just check exact title + category matches.
-    if (latitude == null || longitude == null) {
-      final normalizedTitle = title.trim().toLowerCase();
-      final snap = await _db
-          .collection('reports')
-          .where('category', isEqualTo: category)
-          .get();
-          
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final status = (data['status'] ?? '').toString();
-        if (status == 'Rejected') continue;
+    final normalizedTitle = title.trim().toLowerCase();
 
-        final existingTitle = (data['title'] ?? '').toString().trim().toLowerCase();
-        if (existingTitle.isNotEmpty && existingTitle == normalizedTitle) {
-          return doc;
-        }
-      }
-      return null;
-    }
-
-    // 2. If GPS exists, fetch reports in the same category.
-    // Note: This specific query requires a Composite Index in Firebase.
-    // If the red error shows up, click the link in the error to create it.
     final snap = await _db
         .collection('reports')
         .where('category', isEqualTo: category)
-        .orderBy('createdAt', descending: true)
-        .limit(20) // Check only the 20 most recent
         .get();
 
-    // 3. Loop through them and calculate the distance.
     for (final doc in snap.docs) {
       final data = doc.data();
+
       final status = (data['status'] ?? '').toString();
       if (status == 'Rejected') continue;
 
+      final existingTitle =
+          (data['title'] ?? '').toString().trim().toLowerCase();
       final existingLat = data['latitude'];
       final existingLng = data['longitude'];
 
-      if (existingLat is num && existingLng is num) {
-        final double distanceInMeters = Geolocator.distanceBetween(
-          existingLat.toDouble(),
-          existingLng.toDouble(),
-          latitude,
-          longitude,
-        );
+      if (existingTitle.isNotEmpty && existingTitle == normalizedTitle) {
+        return doc;
+      }
 
-        // If an existing report is within 100 meters, it's a duplicate!
-        if (distanceInMeters <= 100.0) {
+      if (latitude != null &&
+          longitude != null &&
+          existingLat is num &&
+          existingLng is num) {
+        final dLat = (existingLat - latitude).abs();
+        final dLng = (existingLng - longitude).abs();
+        if (dLat < 0.0005 && dLng < 0.0005) {
           return doc;
         }
       }
     }
-
     return null;
   }
 
@@ -227,6 +202,9 @@ class FirestoreService {
     });
   }
 
+  // ============================================================
+  // ✅ APPROVAL FLOW
+  // ============================================================
   Future<List<QueryDocumentSnapshot>> getPendingReports() async {
     return (await _db
             .collection('reports')
@@ -359,35 +337,61 @@ class FirestoreService {
     try {
       final ref = _storage.ref().child(path);
       final UploadTask uploadTask = ref.putFile(file);
-      
-      final TaskSnapshot snapshot = await uploadTask; 
+      final TaskSnapshot snapshot = await uploadTask.timeout(
+        const Duration(seconds: 25),
+        onTimeout: () =>
+            throw Exception('Upload timed out. Please check your connection.'),
+      );
       return await snapshot.ref.getDownloadURL();
     } on FirebaseException catch (e) {
+      if (e.code == 'object-not-found' || e.code == 'bucket-not-found') {
+        try {
+          final fallbackStorage =
+              FirebaseStorage.instanceFor(bucket: 'pwd-works.appspot.com');
+          final ref = fallbackStorage.ref().child(path);
+          final uploadTask = ref.putFile(file);
+          final snapshot =
+              await uploadTask.timeout(const Duration(seconds: 20));
+          return await snapshot.ref.getDownloadURL();
+        } catch (_) {}
+      }
       throw Exception('Storage Error: ${e.code} - ${e.message}');
+    } catch (e) {
+      throw Exception('Upload failed: $e');
     }
   }
 
-  // ✅ FIXED: Waits for upload and adds a 30s timeout to prevent infinite loading on mobile
   Future<String> uploadImageBytes(Uint8List bytes, String path) async {
     try {
       final ref = _storage.ref().child(path);
-      
-      // 1. Start the upload
       final UploadTask uploadTask = ref.putData(
         bytes,
         SettableMetadata(contentType: 'image/jpeg'),
       );
-      
-      // 2. ⚠️ CRITICAL: Wait for the upload, but fail gracefully if it hangs
       final TaskSnapshot snapshot = await uploadTask.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw Exception('Upload timed out. Please check your connection.'),
+        const Duration(seconds: 25),
+        onTimeout: () =>
+            throw Exception('Upload timed out. Please check your connection.'),
       );
-      
-      // 3. Now it's safe to get the URL
       return await snapshot.ref.getDownloadURL();
     } on FirebaseException catch (e) {
+      if (e.code == 'object-not-found' || e.code == 'bucket-not-found') {
+        try {
+          final fallbackStorage =
+              FirebaseStorage.instanceFor(bucket: 'pwd-works.appspot.com');
+          final ref = fallbackStorage.ref().child(path);
+          final uploadTask = ref.putData(
+            bytes,
+            SettableMetadata(contentType: 'image/jpeg'),
+          );
+          final snapshot =
+              await uploadTask.timeout(const Duration(seconds: 20));
+          return await snapshot.ref.getDownloadURL();
+        } catch (_) {}
+      }
       throw Exception('Storage Error: ${e.code} - ${e.message}');
+    } catch (e) {
+      throw Exception('Upload failed: $e');
     }
   }
 

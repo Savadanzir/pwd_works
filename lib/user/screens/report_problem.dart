@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -129,7 +130,7 @@ class _ReportProblemState extends State<ReportProblem> {
   }
 
   // ============================================================
-  // 🚀 SUBMIT — with duplicate check
+  // 🚀 SUBMIT — with duplicate check & resilient image upload
   // ============================================================
   Future<void> _submit() async {
     if (_submitting) return;
@@ -143,7 +144,18 @@ class _ReportProblemState extends State<ReportProblem> {
     }
 
     final user = Provider.of<UserProvider>(context, listen: false).user;
-    if (user == null) return _showError('You must be logged in');
+    final fbUser = FirebaseAuth.instance.currentUser;
+    if (user == null && fbUser == null) {
+      return _showError('You must be logged in to submit a report');
+    }
+
+    final userId = user?.uid ?? fbUser!.uid;
+    final userName = (user?.name != null && user!.name.isNotEmpty)
+        ? user.name
+        : (fbUser?.displayName?.isNotEmpty == true
+            ? fbUser!.displayName!
+            : 'User');
+    final userPhone = user?.phone ?? (fbUser?.phoneNumber ?? '');
 
     setState(() => _submitting = true);
 
@@ -162,30 +174,22 @@ class _ReportProblemState extends State<ReportProblem> {
       }
 
       // 1️⃣ Check for duplicates
-      QueryDocumentSnapshot? duplicate;
-      try {
-        duplicate = await fs.findDuplicateReport(
-          title: _title.text.trim(),
-          category: _category,
-          latitude: _lat,
-          longitude: _lng,
-        );
-      } catch (e) {
-        // 🚨 If Firestore throws the "requires an index" error, we catch it here
-        // so the app doesn't crash. We simply allow the report to be submitted.
-        debugPrint('Index or Query error during duplicate check: $e');
-        duplicate = null; 
-      }
+      final duplicate = await fs.findDuplicateReport(
+        title: _title.text.trim(),
+        category: _category,
+        latitude: _lat,
+        longitude: _lng,
+      );
 
       if (duplicate != null) {
         if (!mounted) return;
         setState(() => _submitting = false);
 
-        // Show the "already reported" custom dialog
+        // Show the "already reported" dialog
         final support = await _showDuplicateDialog();
         if (support == true) {
           // Support the existing report
-          await fs.supportReport(duplicate.id, user.uid);
+          await fs.supportReport(duplicate.id, userId);
           if (!mounted) return;
           _showInfo('You are now supporting the existing report.');
           Navigator.pop(context);
@@ -193,27 +197,39 @@ class _ReportProblemState extends State<ReportProblem> {
         return;
       }
 
-      // 2️⃣ Upload image bytes (Web + Mobile safe)
+      // 2️⃣ Upload image (with fallback so report submission ALWAYS succeeds)
       String? imageUrl;
+      bool imageFailed = false;
       if (kIsWeb && _webImage != null) {
-        final bytes = await _webImage!.readAsBytes();
-        imageUrl = await fs.uploadImageBytes(
-          bytes,
-          'reports/${DateTime.now().millisecondsSinceEpoch}_${_webImage!.name}',
-        );
+        try {
+          final bytes = await _webImage!.readAsBytes();
+          imageUrl = await fs.uploadImageBytes(
+            bytes,
+            'reports/${DateTime.now().millisecondsSinceEpoch}_${_webImage!.name}',
+          );
+        } catch (e) {
+          debugPrint('⚠️ Storage upload failed: $e');
+          imageFailed = true;
+          imageUrl = null;
+        }
       } else if (!kIsWeb && _image != null) {
-        final bytes = await _image!.readAsBytes();
-        imageUrl = await fs.uploadImageBytes(
-          bytes,
-          'reports/${DateTime.now().millisecondsSinceEpoch}_img.jpg',
-        );
+        try {
+          imageUrl = await fs.uploadImage(
+            _image!,
+            'reports/${DateTime.now().millisecondsSinceEpoch}_img.jpg',
+          );
+        } catch (e) {
+          debugPrint('⚠️ Storage upload failed: $e');
+          imageFailed = true;
+          imageUrl = null;
+        }
       }
 
-      // 3️⃣ Save new report
+      // 3️⃣ Save new report to Firestore (sent directly to Admin Applications)
       await fs.addReport({
-        'userId': user.uid,
-        'userName': user.name,
-        'userPhone': user.phone,
+        'userId': userId,
+        'userName': userName,
+        'userPhone': userPhone,
         'title': _title.text.trim(),
         'description': _desc.text.trim(),
         'category': _category,
@@ -222,11 +238,14 @@ class _ReportProblemState extends State<ReportProblem> {
         'longitude': _lng,
         'imageUrl': imageUrl,
         'status': 'Pending',
-        'supporters': <String>[user.uid],
+        'supporters': <String>[userId],
         'createdAt': Timestamp.now(),
       });
 
       if (!mounted) return;
+      if (imageFailed) {
+        _showInfo('Report sent to Admin! (Image upload skipped due to storage error)');
+      }
       await _showSuccessDialog();
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -236,109 +255,44 @@ class _ReportProblemState extends State<ReportProblem> {
     }
   }
 
-  // ---------- Custom Duplicate Dialog UI ----------
+  // ---------- Duplicate dialog ----------
   Future<bool?> _showDuplicateDialog() {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F172A), // Dark navy background
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                )
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Warning Icon
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFF59E0B), width: 3),
-                  ),
-                  child: const Icon(
-                    Icons.info_outline,
-                    color: Color(0xFFF59E0B),
-                    size: 40,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                
-                // Title
-                const Text(
-                  'Already Reported',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                
-                // Subtitle
-                Text(
-                  'This issue has already been reported. You can support the existing report instead of creating a new one.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 30),
-                
-                // Buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    // Cancel Button
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    
-                    // Support Existing Button
-                    ElevatedButton.icon(
-                      onPressed: () => Navigator.pop(context, true),
-                      icon: const Icon(Icons.thumb_up, color: Colors.white, size: 18),
-                      label: const Text('Support Existing'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFF59E0B), // Amber/Orange color
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0B1730),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: const Icon(Icons.info_outline_rounded,
+            color: Color(0xFFF59E0B), size: 54),
+        title: const Text(
+          'Already Reported',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          'This issue has already been reported. You can support the '
+          'existing report instead of creating a new one.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white70)),
           ),
-        );
-      },
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.thumb_up_alt_rounded, size: 16),
+            label: const Text('Support Existing'),
+          ),
+        ],
+      ),
     );
   }
 
