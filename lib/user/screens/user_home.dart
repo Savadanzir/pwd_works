@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/user_provider.dart';
 import 'user_profile.dart';
+import '../../services/settings_service.dart';
+import '../../services/district_selection.dart';
 import 'road_works.dart';
 import 'metro_updates.dart';
 import 'traffic_blocks.dart';
@@ -50,6 +52,10 @@ class _UserHomeState extends State<UserHome> with TickerProviderStateMixin {
 
     _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
     _dustRise = CurvedAnimation(parent: _dustCtrl, curve: Curves.linear);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<UserProvider>(context, listen: false).loadCurrentUser();
+    });
   }
 
   @override
@@ -77,15 +83,20 @@ class _UserHomeState extends State<UserHome> with TickerProviderStateMixin {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('Hi, ${user?.name ?? "User"}',
+        title: Text(
+          _tabIndex == 1
+              ? 'My Profile'
+              : _tabIndex == 2
+                  ? 'Settings'
+                  : 'Hi, ${(user?.name != null && user!.name.isNotEmpty) ? user.name : "User"}',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person),
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const UserProfile())),
-          ),
+          if (_tabIndex != 1)
+            IconButton(
+              icon: const Icon(Icons.person),
+              onPressed: () => setState(() => _tabIndex = 1),
+            ),
         ],
       ),
       body: LayoutBuilder(
@@ -176,13 +187,164 @@ class _UserHomeState extends State<UserHome> with TickerProviderStateMixin {
       case 0:
         return _buildHomeTab();
       case 1:
-        return const Center(child: Text('Profile tab', style: TextStyle(color: Colors.white)));
+        return const UserProfile(isEmbedded: true);
       case 2:
-        return const Center(child: Text('Settings tab', style: TextStyle(color: Colors.white)));
+        return _buildSettingsTab();
       default:
         return _buildHomeTab();
     }
   }
+
+  Widget _buildSettingsTab() {
+    final settings = Provider.of<SettingsService>(context);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 140),
+      children: [
+        const SizedBox(height: 10),
+        const Text('Preferences & Settings',
+            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('Customize your app experience',
+            style: TextStyle(color: Colors.white54, fontSize: 13)),
+        const SizedBox(height: 20),
+
+        _settingsCard(
+          title: 'Notifications',
+          icon: Icons.notifications_active_rounded,
+          color: const Color(0xFF38BDF8),
+          children: [
+            _switchTile(
+              'Push Notifications',
+              'Receive updates on road work and reports',
+              settings.pushNotifications,
+              settings.setPushNotifications,
+            ),
+            _switchTile(
+              'Sound Alerts',
+              'Play sound when high-priority alerts arrive',
+              settings.soundAlerts,
+              settings.setSoundAlerts,
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        _settingsCard(
+          title: 'Location & Region',
+          icon: Icons.location_on_rounded,
+          color: const Color(0xFF10B981),
+          children: [
+            _switchTile(
+              'Location Access',
+              'Auto-detect GPS location for reporting issues',
+              settings.locationTracking,
+              settings.setLocationTracking,
+            ),
+            ListTile(
+              title: const Text('Change Selected District',
+                  style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
+              subtitle: const Text('Switch region for road updates and authorities',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 16),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DistrictSelectionScreen()),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        _settingsCard(
+          title: 'Display & Theme',
+          icon: Icons.palette_rounded,
+          color: const Color(0xFFA855F7),
+          children: [
+            _switchTile(
+              'Dark Neon Mode',
+              'Optimal readability and battery conservation',
+              settings.darkMode,
+              settings.setDarkMode,
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        _settingsCard(
+          title: 'About Application',
+          icon: Icons.info_outline_rounded,
+          color: const Color(0xFFF59E0B),
+          children: const [
+            ListTile(
+              title: Text('PWD Road Maintenance',
+                  style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
+              subtitle: Text('Kerala Public Works Department Citizen Portal',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: Text('v1.0.0', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _settingsCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Widget> children,
+  }) =>
+      ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.white.withOpacity(0.08),
+                Colors.white.withOpacity(0.03),
+              ]),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.16), width: 1.2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Row(
+                    children: [
+                      Icon(icon, color: color, size: 18),
+                      const SizedBox(width: 8),
+                      Text(title,
+                          style: TextStyle(
+                              color: color,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5)),
+                    ],
+                  ),
+                ),
+                ...children,
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Widget _switchTile(String title, String subtitle, bool value, ValueChanged<bool> onChanged) =>
+      SwitchListTile(
+        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        value: value,
+        activeColor: const Color(0xFF38BDF8),
+        onChanged: onChanged,
+      );
 
   // ============================================================
   // 🏠 HOME TAB — News Slideshow + Services (4 + View All) + Authorities
