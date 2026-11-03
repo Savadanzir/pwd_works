@@ -10,6 +10,7 @@ import '../providers/user_provider.dart';
 import 'user_profile.dart';
 import '../../services/settings_service.dart';
 import '../../services/district_selection.dart';
+import '../../services/district_service.dart';
 import 'road_works.dart';
 import 'metro_updates.dart';
 import 'traffic_blocks.dart';
@@ -243,15 +244,40 @@ class _UserHomeState extends State<UserHome> with TickerProviderStateMixin {
               settings.setLocationTracking,
             ),
             ListTile(
-              title: const Text('Change Selected District',
+              title: const Text('Selected District',
                   style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
-              subtitle: const Text('Switch region for road updates and authorities',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
-              trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 16),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DistrictSelectionScreen()),
+              subtitle: Text(
+                DistrictService.current != null && DistrictService.current!.isNotEmpty
+                    ? '${DistrictService.current} District'
+                    : 'Tap to select district',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (DistrictService.current != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        DistrictService.current!,
+                        style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 14),
+                ],
+              ),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DistrictSelection()),
+                );
+                setState(() {});
+              },
             ),
           ],
         ),
@@ -268,6 +294,38 @@ class _UserHomeState extends State<UserHome> with TickerProviderStateMixin {
               'Optimal readability and battery conservation',
               settings.darkMode,
               settings.setDarkMode,
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        _settingsCard(
+          title: 'Help & Citizen Support',
+          icon: Icons.support_agent_rounded,
+          color: const Color(0xFF0EA5E9),
+          children: [
+            ListTile(
+              title: const Text('Help Center & FAQs',
+                  style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
+              subtitle: const Text('Guides on reporting issues, tracking status, and SOS',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 14),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HelpPage()),
+              ),
+            ),
+            ListTile(
+              title: const Text('File a Complaint / Feedback',
+                  style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600)),
+              subtitle: const Text('Send grievances or questions to PWD officials',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 14),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ComplaintsPage()),
+              ),
             ),
           ],
         ),
