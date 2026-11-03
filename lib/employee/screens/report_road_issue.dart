@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/firestore_service.dart';
+import '../../services/geocoding_service.dart';
 import '../../services/location_service.dart';
 import '../providers/employee_provider.dart';
 
@@ -26,6 +27,7 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
   String? _imageName;
   double? _lat, _lng;
   bool _submitting = false;
+  bool _gettingGps = false;
 
   final _categories = ['Traffic Block', 'Road Work', 'Metro', 'Other'];
 
@@ -37,24 +39,16 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
     super.dispose();
   }
 
-  // ---------- Image picker with compression ----------
   Future<void> _pickImage() async {
     try {
       final picker = ImagePicker();
       final x = await picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 60, // 👈 compress
-        maxWidth: 1024, // 👈 resize
-        maxHeight: 1024,
+        imageQuality: 75,
+        maxWidth: 1600,
       );
       if (x == null) return;
-
-      final bytes = await x.readAsBytes().timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw TimeoutException('Image read timed out'),
-          );
-
-      if (!mounted) return;
+      final bytes = await x.readAsBytes();
       setState(() {
         _imageBytes = bytes;
         _imageName = x.name;
@@ -65,18 +59,39 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
   }
 
   Future<void> _getLocation() async {
+    if (_gettingGps) return;
+    setState(() => _gettingGps = true);
+
     try {
       final pos = await LocationService().getCurrentLocation();
       if (pos != null) {
-        setState(() {
-          _lat = pos.latitude;
-          _lng = pos.longitude;
-          _loc.text =
-              '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
-        });
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        _loc.text =
+            '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+
+        try {
+          final addr = await LocationService().getAddressFromCoordinates(
+            pos.latitude,
+            pos.longitude,
+          );
+          if (addr != null && addr.trim().isNotEmpty) {
+            _loc.text = addr;
+          }
+        } catch (_) {}
+
+        if (mounted) {
+          setState(() {});
+          _snack('GPS Location retrieved successfully', const Color(0xFF10B981));
+        }
+      } else {
+        _snack('Location not available. Ensure GPS is turned on.', Colors.orangeAccent);
       }
     } catch (e) {
-      _snack('Location error: $e', Colors.redAccent);
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _snack('Location error: $msg', Colors.redAccent);
+    } finally {
+      if (mounted) setState(() => _gettingGps = false);
     }
   }
 
@@ -97,6 +112,11 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
 
     if (_title.text.trim().isEmpty || _desc.text.trim().isEmpty) {
       _snack('Please fill title & description', Colors.orangeAccent);
+      return;
+    }
+
+    if (_loc.text.trim().isEmpty) {
+      _snack('Please enter a location or tap Get GPS', Colors.orangeAccent);
       return;
     }
 
@@ -129,6 +149,17 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
       final emp =
           Provider.of<EmployeeProvider>(context, listen: false).employee;
 
+      // Geocode fallback if manual location typed without GPS button
+      if ((_lat == null || _lng == null) && _loc.text.trim().isNotEmpty) {
+        try {
+          final resolved = await GeocodingService.geocode(_loc.text.trim());
+          if (resolved != null) {
+            _lat = resolved.latitude;
+            _lng = resolved.longitude;
+          }
+        } catch (_) {}
+      }
+
       await FirestoreService().addReport({
         'userId': emp?.uid ?? '',
         'userName': emp?.name ?? 'Employee',
@@ -153,12 +184,10 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
       _snack('✅ Report sent to user & admin', const Color(0xFF10B981));
       Navigator.pop(context);
     } on TimeoutException {
-      _snack('⌛ Saving timed out. Please check your connection and retry.',
-          Colors.orangeAccent);
+      _snack('Connection timed out. Check internet.', Colors.redAccent);
     } catch (e) {
-      _snack('❌ Failed: $e', Colors.redAccent);
+      _snack('Failed to send report: $e', Colors.redAccent);
     } finally {
-      // 👈 Guaranteed spinner reset
       if (mounted) setState(() => _submitting = false);
     }
   }
@@ -167,67 +196,73 @@ class _ReportRoadIssueState extends State<ReportRoadIssue> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF04060F),
-      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        title: const Text('Report Road Issue',
+            style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Report Road Issue',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
       ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: RadialGradient(
             center: Alignment(-0.4, -0.6),
             radius: 1.5,
-            colors: [Color(0xFF3A0A18), Color(0xFF16040A), Color(0xFF04060F)],
+            colors: [Color(0xFF330C12), Color(0xFF1B070A), Color(0xFF04060F)],
             stops: [0.0, 0.55, 1.0],
           ),
         ),
         child: SafeArea(
-          child: ListView(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
-            children: [
-              _glassField(_title, 'Title', Icons.title_rounded),
-              const SizedBox(height: 14),
-              _categoryDropdown(),
-              const SizedBox(height: 14),
-              _glassField(_desc, 'Description', Icons.description_rounded,
-                  maxLines: 3),
-              const SizedBox(height: 14),
-              _glassField(_loc, 'Location', Icons.location_on_rounded),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _iconBtn(
-                        Icons.my_location_rounded, 'Get GPS', _getLocation),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _iconBtn(
-                      Icons.image_rounded,
-                      _imageBytes == null ? 'Pick Image' : 'Change',
-                      _pickImage,
+            child: Column(
+              children: [
+                _glassField(_title, 'Title', Icons.title_rounded),
+                const SizedBox(height: 14),
+                _categoryDropdown(),
+                const SizedBox(height: 14),
+                _glassField(_desc, 'Description', Icons.description_rounded,
+                    maxLines: 3),
+                const SizedBox(height: 14),
+                _glassField(_loc, 'Location', Icons.location_on_rounded),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _iconBtn(
+                        _gettingGps
+                            ? Icons.hourglass_top_rounded
+                            : Icons.my_location_rounded,
+                        _gettingGps ? 'Getting GPS...' : 'Get GPS',
+                        _getLocation,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              if (_imageBytes != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.memory(
-                      _imageBytes!,
-                      height: 180,
-                      fit: BoxFit.cover,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _iconBtn(
+                        Icons.image_rounded,
+                        _imageBytes == null ? 'Pick Image' : 'Change',
+                        _pickImage,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              const SizedBox(height: 24),
-              _submitButton(),
-            ],
+                if (_imageBytes != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.memory(
+                        _imageBytes!,
+                        height: 180,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 24),
+                _submitButton(),
+              ],
+            ),
           ),
         ),
       ),

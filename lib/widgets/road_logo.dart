@@ -43,7 +43,7 @@ class RoadLogo extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: Image.asset(
-          'lib/assets/images/road_logo.png',
+          'assets/images/road_logo.png', // 👈 Path updated here
           fit: BoxFit.contain,
         ),
       ),

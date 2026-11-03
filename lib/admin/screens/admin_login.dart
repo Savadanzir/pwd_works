@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:road_maintenance/services/district_service.dart';
+
 
 import '../../widgets/road_logo.dart';
 import '../providers/admin_provider.dart';
@@ -15,8 +17,7 @@ class AdminLogin extends StatefulWidget {
   State<AdminLogin> createState() => _AdminLoginState();
 }
 
-class _AdminLoginState extends State<AdminLogin>
-    with TickerProviderStateMixin {
+class _AdminLoginState extends State<AdminLogin> with TickerProviderStateMixin {
   late final TextEditingController _email;
   late final TextEditingController _pass;
 
@@ -64,19 +65,19 @@ class _AdminLoginState extends State<AdminLogin>
     _email = TextEditingController(text: creds?['email'] ?? '');
     _pass = TextEditingController(text: creds?['password'] ?? '');
 
-    _bgCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 10))
-      ..repeat(reverse: true);
+    _bgCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 10))
+          ..repeat(reverse: true);
     _bgAnim = CurvedAnimation(parent: _bgCtrl, curve: Curves.easeInOut);
 
-    _orbCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 14))
-      ..repeat(reverse: true);
+    _orbCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 14))
+          ..repeat(reverse: true);
     _orbAnim = CurvedAnimation(parent: _orbCtrl, curve: Curves.easeInOut);
 
-    _dustCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 6))
-      ..repeat();
+    _dustCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 6))
+          ..repeat();
     _dustRise = CurvedAnimation(parent: _dustCtrl, curve: Curves.linear);
 
     _cardCtrl = AnimationController(
@@ -89,14 +90,14 @@ class _AdminLoginState extends State<AdminLogin>
 
     _logoCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200));
-    _logoRotate = Tween<double>(begin: -0.15, end: 0.0).animate(
-        CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
+    _logoRotate = Tween<double>(begin: -0.15, end: 0.0)
+        .animate(CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
 
     _formCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900));
     _formSlide = Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
-        .animate(CurvedAnimation(
-            parent: _formCtrl, curve: Curves.easeOutCubic));
+        .animate(
+            CurvedAnimation(parent: _formCtrl, curve: Curves.easeOutCubic));
 
     _cardCtrl.forward();
     _logoCtrl.forward();
@@ -170,6 +171,8 @@ class _AdminLoginState extends State<AdminLogin>
       );
       return;
     }
+
+    await DistrictService.set(_selectedDistrict!);
 
     if (!mounted) return;
     Navigator.pushReplacement(
@@ -354,8 +357,8 @@ class _AdminLoginState extends State<AdminLogin>
                 stops: const [0.0, 0.5, 1.0],
               ),
               borderRadius: BorderRadius.circular(32),
-              border: Border.all(
-                  color: Colors.white.withOpacity(0.18), width: 1.3),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.18), width: 1.3),
               boxShadow: [
                 BoxShadow(
                     color: Colors.black.withOpacity(0.55),
@@ -368,12 +371,11 @@ class _AdminLoginState extends State<AdminLogin>
               ],
             ),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 👇 Logo
+                  // 👇 Uses the RoadLogo widget which points to assets/images/
                   const RoadLogo(
                     width: 220,
                     glowColor: Color(0xFF3B82F6),
@@ -462,8 +464,7 @@ class _AdminLoginState extends State<AdminLogin>
                   Text(
                     'Choose your district',
                     style: TextStyle(
-                        color: Colors.white.withOpacity(0.55),
-                        fontSize: 14.5),
+                        color: Colors.white.withOpacity(0.55), fontSize: 14.5),
                   ),
                 ],
               ),
@@ -471,8 +472,7 @@ class _AdminLoginState extends State<AdminLogin>
                   .map((d) => Row(
                         children: [
                           Icon(Icons.location_city_rounded,
-                              color: Colors.white.withOpacity(0.85),
-                              size: 20),
+                              color: Colors.white.withOpacity(0.85), size: 20),
                           const SizedBox(width: 12),
                           Text(d,
                               style: const TextStyle(
@@ -510,8 +510,8 @@ class _AdminLoginState extends State<AdminLogin>
               Colors.white.withOpacity(0.04),
             ]),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: Colors.white.withOpacity(0.28), width: 1.2),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
           ),
           child: TextField(
             controller: c,
@@ -588,8 +588,8 @@ class _AdminLoginState extends State<AdminLogin>
                 const Color(0xFF3B82F6).withOpacity(0.08),
               ]),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: Colors.white.withOpacity(0.22), width: 1.1),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.22), width: 1.1),
             ),
             child: Row(
               children: [

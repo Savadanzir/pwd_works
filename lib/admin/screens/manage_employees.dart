@@ -47,7 +47,7 @@ class _ManageEmployeesState extends State<ManageEmployees> {
   @override
   void initState() {
     super.initState();
-    // Default to the admin's own district
+    // Default to the admin's current district
     _district = DistrictService.current;
   }
 
@@ -73,6 +73,7 @@ class _ManageEmployeesState extends State<ManageEmployees> {
   Future<void> _create() async {
     if (_submitting) return;
 
+    // Basic Validation
     if (_name.text.trim().isEmpty ||
         _email.text.trim().isEmpty ||
         _phone.text.trim().isEmpty ||
@@ -99,20 +100,27 @@ class _ManageEmployeesState extends State<ManageEmployees> {
       final fs = FirestoreService();
 
       // Create the auth user + Firestore doc
-      final uid = await fs.createEmployeeAccount(
-        email: _email.text.trim(),
-        password: _pass.text,
-        name: _name.text.trim(),
-        phone: _phone.text.trim(),
-        department: _department,
-      );
+      // Using .timeout() prevents the app from hanging forever if the network drops
+      final uid = await fs
+          .createEmployeeAccount(
+            email: _email.text.trim(),
+            password: _pass.text,
+            name: _name.text.trim(),
+            phone: _phone.text.trim(),
+            department: _department,
+          )
+          .timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw Exception('Network timeout. Please check your internet connection.'),
+          );
 
-      // 👇 Save the district the admin picked
+      // Save the district the admin picked
       await fs.updateEmployee(uid, {'district': _district});
 
       if (!mounted) return;
       _snack('✅ Employee created for $_district', const Color(0xFF10B981));
 
+      // Clear fields
       _name.clear();
       _phone.clear();
       _email.clear();
@@ -123,7 +131,18 @@ class _ManageEmployeesState extends State<ManageEmployees> {
         _district = DistrictService.current;
       });
     } catch (e) {
-      _snack('❌ Failed: $e', Colors.redAccent);
+      String errorMsg = e.toString();
+      
+      // Provide a clearer message for the specific network error
+      if (errorMsg.contains('network-request-failed')) {
+        errorMsg = 'Network error: Firebase is unreachable. Please check your internet or disable adblockers.';
+      } else if (errorMsg.contains('email-already-in-use')) {
+        errorMsg = 'This email address is already registered.';
+      } else if (errorMsg.contains('weak-password')) {
+        errorMsg = 'The password is too weak. Use 6+ characters.';
+      }
+
+      _snack('❌ Failed: $errorMsg', Colors.redAccent);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -161,11 +180,8 @@ class _ManageEmployeesState extends State<ManageEmployees> {
               _glassField(_phone, 'Phone Number', Icons.phone_rounded,
                   keyboard: TextInputType.phone),
               const SizedBox(height: 14),
-
-              // 👇 NEW: District picker
               _districtDropdown(),
               const SizedBox(height: 14),
-
               _departmentDropdown(),
               const SizedBox(height: 14),
               _glassField(_email, 'Email ID', Icons.email_rounded,
@@ -327,7 +343,6 @@ class _ManageEmployeesState extends State<ManageEmployees> {
         ),
       );
 
-  // 👇 NEW: District dropdown
   Widget _districtDropdown() => ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(

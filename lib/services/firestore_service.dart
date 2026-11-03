@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geolocator/geolocator.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -36,7 +37,6 @@ class FirestoreService {
   Future<DocumentSnapshot> getEmployee(String uid) =>
       _db.collection('employees').doc(uid).get();
 
-  /// Get every registered employee (used by admin's Assign Work screen).
   Future<List<QueryDocumentSnapshot>> getAllEmployees() async {
     final snap = await _db
         .collection('employees')
@@ -45,7 +45,6 @@ class FirestoreService {
     return snap.docs;
   }
 
-  /// Get employees filtered by department.
   Future<List<QueryDocumentSnapshot>> getEmployeesByDepartment(
       String department) async {
     final snap = await _db
@@ -62,8 +61,6 @@ class FirestoreService {
     await _db.collection('employees').doc(uid).delete();
   }
 
-  /// Creates a Firebase Auth user for an employee WITHOUT signing out
-  /// the currently signed-in admin (uses a secondary Firebase app).
   Future<String> createEmployeeAccount({
     required String email,
     required String password,
@@ -118,7 +115,6 @@ class FirestoreService {
   Future<void> addReport(Map<String, dynamic> data) =>
       _db.collection('reports').add(data);
 
-  /// Get all reports ordered by newest first (used by Admin Applications).
   Future<List<QueryDocumentSnapshot>> getAllReports() async {
     final snap = await _db
         .collection('reports')
@@ -127,14 +123,12 @@ class FirestoreService {
     return snap.docs;
   }
 
-  /// Get only the reports submitted by a specific user.
   Future<List<QueryDocumentSnapshot>> getUserReports(String uid) async {
     final snap =
         await _db.collection('reports').where('userId', isEqualTo: uid).get();
     return snap.docs;
   }
 
-  /// Get only the reports assigned to a specific employee.
   Future<List<QueryDocumentSnapshot>> getEmployeeWorks(String empId) async {
     final snap = await _db
         .collection('reports')
@@ -143,15 +137,9 @@ class FirestoreService {
     return snap.docs;
   }
 
-  /// Update a report (used for approving, assigning, marking complete, etc.)
   Future<void> updateReport(String id, Map<String, dynamic> data) =>
       _db.collection('reports').doc(id).update(data);
 
-  // ============================================================
-  // 🔍 DUPLICATE DETECTION (simple — title only)
-  // ============================================================
-  /// Returns true if a similar report (same title, case-insensitive) exists
-  /// with a non-rejected status — i.e., someone already reported it.
   Future<bool> reportAlreadyExists(String title) async {
     final normalized = title.trim().toLowerCase();
     final snap = await _db.collection('reports').get();
@@ -167,71 +155,78 @@ class FirestoreService {
   }
 
   // ============================================================
-  // 🔍 DUPLICATE DETECTION (advanced — title + category + GPS)
+  // 🕵️ DUPLICATE CHECK LOGIC (Distance-based)
   // ============================================================
-  /// Returns the existing report document if a duplicate is found, else null.
-  /// A duplicate is:
-  ///   - Same title (case-insensitive, trimmed) AND same category, OR
-  ///   - Same category AND GPS within ~50 m (~0.0005 degrees)
   Future<QueryDocumentSnapshot?> findDuplicateReport({
     required String title,
     required String category,
     double? latitude,
     double? longitude,
   }) async {
-    final normalizedTitle = title.trim().toLowerCase();
+    // 1. If no GPS, just check exact title + category matches.
+    if (latitude == null || longitude == null) {
+      final normalizedTitle = title.trim().toLowerCase();
+      final snap = await _db
+          .collection('reports')
+          .where('category', isEqualTo: category)
+          .get();
+          
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final status = (data['status'] ?? '').toString();
+        if (status == 'Rejected') continue;
 
-    // Load reports of the same category
+        final existingTitle = (data['title'] ?? '').toString().trim().toLowerCase();
+        if (existingTitle.isNotEmpty && existingTitle == normalizedTitle) {
+          return doc;
+        }
+      }
+      return null;
+    }
+
+    // 2. If GPS exists, fetch reports in the same category.
+    // Note: This specific query requires a Composite Index in Firebase.
+    // If the red error shows up, click the link in the error to create it.
     final snap = await _db
         .collection('reports')
         .where('category', isEqualTo: category)
+        .orderBy('createdAt', descending: true)
+        .limit(20) // Check only the 20 most recent
         .get();
 
+    // 3. Loop through them and calculate the distance.
     for (final doc in snap.docs) {
       final data = doc.data();
-
-      // Skip already-rejected reports — user is allowed to report them again
       final status = (data['status'] ?? '').toString();
       if (status == 'Rejected') continue;
 
-      final existingTitle =
-          (data['title'] ?? '').toString().trim().toLowerCase();
       final existingLat = data['latitude'];
       final existingLng = data['longitude'];
 
-      // 1. Title match
-      if (existingTitle.isNotEmpty && existingTitle == normalizedTitle) {
-        return doc;
-      }
+      if (existingLat is num && existingLng is num) {
+        final double distanceInMeters = Geolocator.distanceBetween(
+          existingLat.toDouble(),
+          existingLng.toDouble(),
+          latitude,
+          longitude,
+        );
 
-      // 2. GPS proximity match (~50 m)
-      if (latitude != null &&
-          longitude != null &&
-          existingLat is num &&
-          existingLng is num) {
-        final dLat = (existingLat - latitude).abs();
-        final dLng = (existingLng - longitude).abs();
-        // ~0.0005 degrees ≈ 50 m
-        if (dLat < 0.0005 && dLng < 0.0005) {
+        // If an existing report is within 100 meters, it's a duplicate!
+        if (distanceInMeters <= 100.0) {
           return doc;
         }
       }
     }
+
     return null;
   }
 
-  /// Adds the current user's uid to the report's `supporters` array.
   Future<void> supportReport(String reportId, String userId) async {
     await _db.collection('reports').doc(reportId).update({
       'supporters': FieldValue.arrayUnion([userId]),
     });
   }
 
-  // ============================================================
-  // ✅ APPROVAL FLOW — report status queries
-  // ============================================================
-
-  /// Reports waiting for admin approval (Pending)
   Future<List<QueryDocumentSnapshot>> getPendingReports() async {
     return (await _db
             .collection('reports')
@@ -240,7 +235,6 @@ class FirestoreService {
         .docs;
   }
 
-  /// Reports approved by admin, ready to be assigned
   Future<List<QueryDocumentSnapshot>> getApprovedReports() async {
     return (await _db
             .collection('reports')
@@ -249,7 +243,6 @@ class FirestoreService {
         .docs;
   }
 
-  /// Reports rejected by admin
   Future<List<QueryDocumentSnapshot>> getRejectedReports() async {
     return (await _db
             .collection('reports')
@@ -258,7 +251,6 @@ class FirestoreService {
         .docs;
   }
 
-  /// Reports currently being worked on (assigned, in progress)
   Future<List<QueryDocumentSnapshot>> getActiveReports() async {
     final results = <QueryDocumentSnapshot>[];
 
@@ -270,7 +262,6 @@ class FirestoreService {
       results.addAll(snap.docs);
     }
 
-    // Sort client-side by createdAt desc
     results.sort((a, b) {
       final ta = (a.data() as Map)['createdAt'];
       final tb = (b.data() as Map)['createdAt'];
@@ -282,7 +273,6 @@ class FirestoreService {
     return results;
   }
 
-  /// Reports that are completed
   Future<List<QueryDocumentSnapshot>> getCompletedReports() async {
     return (await _db
             .collection('reports')
@@ -291,7 +281,6 @@ class FirestoreService {
         .docs;
   }
 
-  /// Admin approves a report
   Future<void> approveReport(String id, {String? adminName}) async {
     await _db.collection('reports').doc(id).update({
       'status': 'Approved',
@@ -301,7 +290,6 @@ class FirestoreService {
     });
   }
 
-  /// Admin rejects a report (with reply message sent to user)
   Future<void> rejectReport(
     String id, {
     required String reason,
@@ -318,7 +306,6 @@ class FirestoreService {
     });
   }
 
-  /// Admin assigns an approved report to an employee
   Future<void> assignReport({
     required String reportId,
     required String employeeUid,
@@ -337,7 +324,6 @@ class FirestoreService {
     });
   }
 
-  /// Employee starts work
   Future<void> markInProgress(String id, {String? workNote}) async {
     await _db.collection('reports').doc(id).update({
       'status': 'In Progress',
@@ -347,7 +333,6 @@ class FirestoreService {
     });
   }
 
-  /// Employee submits completion with evidence
   Future<void> markCompleted(
     String id, {
     String? workNote,
@@ -362,7 +347,6 @@ class FirestoreService {
     });
   }
 
-  /// Marks the admin reply as seen by the user
   Future<void> markReplySeen(String id) async {
     await _db.collection('reports').doc(id).update({'replySeen': true});
   }
@@ -371,22 +355,42 @@ class FirestoreService {
   // 📦 STORAGE — Image uploads
   // ============================================================
 
-  /// Upload image using a File (mobile only).
   Future<String> uploadImage(File file, String path) async {
-    final ref = _storage.ref().child(path);
-    await ref.putFile(file);
-    return await ref.getDownloadURL();
+    try {
+      final ref = _storage.ref().child(path);
+      final UploadTask uploadTask = ref.putFile(file);
+      
+      final TaskSnapshot snapshot = await uploadTask; 
+      return await snapshot.ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw Exception('Storage Error: ${e.code} - ${e.message}');
+    }
   }
 
-  /// Upload image using raw bytes (works on Web AND Mobile).
-  /// Use this for Flutter Web compatibility.
+  // ✅ FIXED: Waits for upload and adds a 30s timeout to prevent infinite loading on mobile
   Future<String> uploadImageBytes(Uint8List bytes, String path) async {
-    final ref = _storage.ref().child(path);
-    await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-    return await ref.getDownloadURL();
+    try {
+      final ref = _storage.ref().child(path);
+      
+      // 1. Start the upload
+      final UploadTask uploadTask = ref.putData(
+        bytes,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      
+      // 2. ⚠️ CRITICAL: Wait for the upload, but fail gracefully if it hangs
+      final TaskSnapshot snapshot = await uploadTask.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw Exception('Upload timed out. Please check your connection.'),
+      );
+      
+      // 3. Now it's safe to get the URL
+      return await snapshot.ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw Exception('Storage Error: ${e.code} - ${e.message}');
+    }
   }
 
-  /// Alias for uploadImageBytes — kept for backwards compatibility.
   Future<String> uploadBytes(Uint8List bytes, String path) =>
       uploadImageBytes(bytes, path);
 }

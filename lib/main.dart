@@ -4,9 +4,15 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:road_maintenance/services/district_selection.dart';
+import 'package:road_maintenance/services/district_service.dart';
 import 'package:road_maintenance/services/settings_service.dart';
 
 import 'firebase_options.dart';
+
+// ============================================================
+// DISTRICT
+// ============================================================
 
 // ============================================================
 // USER MODULE
@@ -117,28 +123,59 @@ class MyApp extends StatelessWidget {
           primarySwatch: Colors.blue,
           scaffoldBackgroundColor: const Color(0xFF04060F),
         ),
-        home: const PlatformGate(),
+        home: const DistrictGate(),
       ),
     );
   }
 }
 
 // ============================================================
+// 🌐 DISTRICT GATE
+// ============================================================
+class DistrictGate extends StatelessWidget {
+  const DistrictGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: DistrictService.load(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF04060F),
+            body: Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          );
+        }
+        if (snapshot.data == null) {
+          return const DistrictSelection();
+        }
+        return const PlatformGate();
+      },
+    );
+  }
+}
+
+// ============================================================
 // 🌐 PLATFORM GATE
-// 📱 Mobile  → User login ONLY
-// 🖥️ Web     → Admin & Employee login ONLY
+// ⚠️ TEMPORARILY BYPASSED FOR WEB TESTING
 // ============================================================
 class PlatformGate extends StatelessWidget {
   const PlatformGate({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // If Mobile -> Go straight to User Login
+    // 👇 FORCES USER LOGIN ON ALL PLATFORMS FOR TESTING
+    return const UserLogin(); 
+    
+    /* 
+    // ORIGINAL LOGIC (Uncomment this when done testing)
     if (!kIsWeb) {
       return const UserLogin();
     }
-    // If Web -> Show the Web Portal (Admin & Employee)
     return const WebPortalScreen();
+    */
   }
 }
 

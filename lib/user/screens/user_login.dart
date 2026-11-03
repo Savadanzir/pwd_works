@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
-import 'package:flutter/foundation.dart'
-    show kIsWeb; // 👈 Added for platform check
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -12,6 +12,7 @@ import 'user_register.dart';
 
 class UserLogin extends StatefulWidget {
   const UserLogin({super.key});
+
   @override
   State<UserLogin> createState() => _UserLoginState();
 }
@@ -26,18 +27,21 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
       _cardCtrl,
       _logoCtrl,
       _formCtrl;
+
   late Animation<double> _bgAnim,
       _orbAnim,
       _dustRise,
       _cardScale,
       _cardFade,
       _logoRotate;
+
   late Animation<Offset> _formSlide;
   Offset _parallax = Offset.zero;
 
   @override
   void initState() {
     super.initState();
+
     _bgCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 10))
           ..repeat(reverse: true);
@@ -100,7 +104,8 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // 👇 BLOCK WEB ACCESS
+    // 👇 WEB BLOCK DISABLED FOR TESTING
+    /*
     if (kIsWeb) {
       return const Scaffold(
         backgroundColor: Color(0xFF04060F),
@@ -116,6 +121,7 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
         ),
       );
     }
+    */
 
     final prov = Provider.of<UserProvider>(context);
 
@@ -126,7 +132,8 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text('User Login',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            style:
+                TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: LayoutBuilder(
@@ -268,8 +275,8 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
                 stops: const [0.0, 0.5, 1.0],
               ),
               borderRadius: BorderRadius.circular(32),
-              border:
-                  Border.all(color: Colors.white.withOpacity(0.18), width: 1.3),
+              border: Border.all(
+                  color: Colors.white.withOpacity(0.18), width: 1.3),
               boxShadow: [
                 BoxShadow(
                     color: Colors.black.withOpacity(0.55),
@@ -282,7 +289,8 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -330,7 +338,7 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
                         _glassField(_pass, 'Password', Icons.lock_rounded,
                             obscure: true),
                         const SizedBox(height: 26),
-                        _primaryButton(prov),
+                        _primaryButton(),
                         const SizedBox(height: 18),
                         TextButton(
                           onPressed: () => Navigator.push(
@@ -404,61 +412,69 @@ class _UserLoginState extends State<UserLogin> with TickerProviderStateMixin {
     );
   }
 
-  Widget _primaryButton(UserProvider prov) => GestureDetector(
-        onTap: prov.loading
-            ? null
-            : () async {
-                final err = await prov.login(_email.text.trim(), _pass.text);
-                if (err == null && mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const UserHome()),
-                  );
-                } else if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(err ?? 'Login failed'),
-                      backgroundColor: const Color(0xFFB91C1C),
-                      behavior: SnackBarBehavior.floating,
+  Widget _primaryButton() {
+    return Consumer<UserProvider>(
+      builder: (context, prov, _) {
+        return GestureDetector(
+          onTap: prov.loading
+              ? null
+              : () async {
+                  final err =
+                      await prov.login(_email.text.trim(), _pass.text);
+                  if (!mounted) return;
+                  if (err == null) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const UserHome()),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(err),
+                        backgroundColor: const Color(0xFFB91C1C),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                },
+          child: Container(
+            height: 58,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)]),
+              boxShadow: [
+                BoxShadow(
+                    color: const Color(0xFF3B82F6).withOpacity(0.55),
+                    blurRadius: 26,
+                    offset: const Offset(0, 10)),
+              ],
+            ),
+            child: Center(
+              child: prov.loading
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Login',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16.5,
+                                fontWeight: FontWeight.w700)),
+                        SizedBox(width: 10),
+                        Icon(Icons.arrow_forward_rounded,
+                            color: Colors.white, size: 20),
+                      ],
                     ),
-                  );
-                }
-              },
-        child: Container(
-          height: 58,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: const LinearGradient(
-                colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)]),
-            boxShadow: [
-              BoxShadow(
-                  color: const Color(0xFF3B82F6).withOpacity(0.55),
-                  blurRadius: 26,
-                  offset: const Offset(0, 10)),
-            ],
+            ),
           ),
-          child: Center(
-            child: prov.loading
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2))
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('Login',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16.5,
-                              fontWeight: FontWeight.w700)),
-                      SizedBox(width: 10),
-                      Icon(Icons.arrow_forward_rounded,
-                          color: Colors.white, size: 20),
-                    ],
-                  ),
-          ),
-        ),
-      );
+        );
+      },
+    );
+  }
 }

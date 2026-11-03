@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app requires access to your location to attach GPS coordinates to road issue reports.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app requires access to your location to attach GPS coordinates to road issue reports.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app requires access to your photo library to attach photos of road issues.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app requires access to your camera to take photos of road issues.</string>
 </dict>
 </plist>

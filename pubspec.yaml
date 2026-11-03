@@ -1,4 +1,3 @@
-
 name: road_maintenance
 description: Road Maintenance Reporting App
 publish_to: 'none'
@@ -37,8 +36,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-     - lib/assets/images/road_logo.png
-     - lib/assets/icons/images.jpeg
+     - assets/images/
+     - assets/icons/
   
 
 flutter_launcher_icons:

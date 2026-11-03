@@ -333,7 +333,7 @@ class _EmployeeLoginState extends State<EmployeeLogin>
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                // 👇 Logo
+                // 👇 Uses the RoadLogo widget which points to assets/images/
                 const RoadLogo(
                   width: 220,
                   glowColor: Color(0xFFF59E0B),

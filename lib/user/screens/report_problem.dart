@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/firestore_service.dart';
+import '../../services/geocoding_service.dart';
 import '../../services/location_service.dart';
 import '../providers/user_provider.dart';
 
@@ -27,6 +28,7 @@ class _ReportProblemState extends State<ReportProblem> {
   double? _lat, _lng;
 
   bool _submitting = false;
+  bool _gettingGps = false;
 
   final _categories = ['Road Work', 'Metro', 'Traffic Block', 'Other'];
 
@@ -60,20 +62,47 @@ class _ReportProblemState extends State<ReportProblem> {
   }
 
   Future<void> _getLocation() async {
+    if (_gettingGps) return;
+    setState(() => _gettingGps = true);
+
     try {
       final pos = await LocationService().getCurrentLocation();
       if (pos != null) {
-        setState(() {
-          _lat = pos.latitude;
-          _lng = pos.longitude;
-          _loc.text =
-              '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
-        });
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        _loc.text =
+            '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+
+        // Try reverse geocoding to give a human-readable address
+        try {
+          final addr = await LocationService().getAddressFromCoordinates(
+            pos.latitude,
+            pos.longitude,
+          );
+          if (addr != null && addr.trim().isNotEmpty) {
+            _loc.text = addr;
+          }
+        } catch (_) {}
+
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('GPS Location fetched successfully!'),
+              backgroundColor: Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       } else {
-        _showError('Location not available.');
+        _showError('Location not available. Please ensure GPS is enabled.');
       }
     } catch (e) {
-      _showError('Location error: $e');
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _showError('Location error: $msg');
+    } finally {
+      if (mounted) setState(() => _gettingGps = false);
     }
   }
 
@@ -109,6 +138,9 @@ class _ReportProblemState extends State<ReportProblem> {
     if (_desc.text.trim().isEmpty) {
       return _showError('Please describe the problem');
     }
+    if (_loc.text.trim().isEmpty) {
+      return _showError('Please enter a location or tap Get GPS');
+    }
 
     final user = Provider.of<UserProvider>(context, listen: false).user;
     if (user == null) return _showError('You must be logged in');
@@ -118,19 +150,38 @@ class _ReportProblemState extends State<ReportProblem> {
     try {
       final fs = FirestoreService();
 
+      // If user typed location manually without tapping Get GPS, attempt to resolve coordinates
+      if ((_lat == null || _lng == null) && _loc.text.trim().isNotEmpty) {
+        try {
+          final resolved = await GeocodingService.geocode(_loc.text.trim());
+          if (resolved != null) {
+            _lat = resolved.latitude;
+            _lng = resolved.longitude;
+          }
+        } catch (_) {}
+      }
+
       // 1️⃣ Check for duplicates
-      final duplicate = await fs.findDuplicateReport(
-        title: _title.text.trim(),
-        category: _category,
-        latitude: _lat,
-        longitude: _lng,
-      );
+      QueryDocumentSnapshot? duplicate;
+      try {
+        duplicate = await fs.findDuplicateReport(
+          title: _title.text.trim(),
+          category: _category,
+          latitude: _lat,
+          longitude: _lng,
+        );
+      } catch (e) {
+        // 🚨 If Firestore throws the "requires an index" error, we catch it here
+        // so the app doesn't crash. We simply allow the report to be submitted.
+        debugPrint('Index or Query error during duplicate check: $e');
+        duplicate = null; 
+      }
 
       if (duplicate != null) {
         if (!mounted) return;
         setState(() => _submitting = false);
 
-        // Show the "already reported" dialog
+        // Show the "already reported" custom dialog
         final support = await _showDuplicateDialog();
         if (support == true) {
           // Support the existing report
@@ -185,44 +236,109 @@ class _ReportProblemState extends State<ReportProblem> {
     }
   }
 
-  // ---------- Duplicate dialog ----------
+  // ---------- Custom Duplicate Dialog UI ----------
   Future<bool?> _showDuplicateDialog() {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF0B1730),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        icon: const Icon(Icons.info_outline_rounded,
-            color: Color(0xFFF59E0B), size: 54),
-        title: const Text(
-          'Already Reported',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
-        ),
-        content: const Text(
-          'This issue has already been reported. You can support the '
-          'existing report instead of creating a new one.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white70, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: Colors.white70)),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF59E0B),
-              foregroundColor: Colors.white,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A), // Dark navy background
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                )
+              ],
             ),
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.thumb_up_alt_rounded, size: 16),
-            label: const Text('Support Existing'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Warning Icon
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFF59E0B), width: 3),
+                  ),
+                  child: const Icon(
+                    Icons.info_outline,
+                    color: Color(0xFFF59E0B),
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // Title
+                const Text(
+                  'Already Reported',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                
+                // Subtitle
+                Text(
+                  'This issue has already been reported. You can support the existing report instead of creating a new one.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.7),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 30),
+                
+                // Buttons
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    // Cancel Button
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    
+                    // Support Existing Button
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.pop(context, true),
+                      icon: const Icon(Icons.thumb_up, color: Colors.white, size: 18),
+                      label: const Text('Support Existing'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF59E0B), // Amber/Orange color
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -292,8 +408,14 @@ class _ReportProblemState extends State<ReportProblem> {
                 Row(
                   children: [
                     Expanded(
-                        child: _iconBtn(
-                            Icons.my_location_rounded, 'Get GPS', _getLocation)),
+                      child: _iconBtn(
+                        _gettingGps
+                            ? Icons.hourglass_top_rounded
+                            : Icons.my_location_rounded,
+                        _gettingGps ? 'Getting GPS...' : 'Get GPS',
+                        _getLocation,
+                      ),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _iconBtn(
